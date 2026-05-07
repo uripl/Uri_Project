@@ -12,6 +12,8 @@ data/*.db
 data/*.db-journal
 
 .streamlit/secrets.toml
+service-account*.json
+gcp-credentials*.json
 
 .pytest_cache/
 .coverage

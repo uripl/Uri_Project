@@ -1,98 +1,310 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+def _parse_date(value) -> date:
+    if value is None or value == "":
+        return date.today()
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    return date.fromisoformat(str(value))
 
 
-class Base(DeclarativeBase):
-    pass
+def _parse_optional_date(value) -> date | None:
+    if value is None or value == "":
+        return None
+    return _parse_date(value)
 
 
-class Tenant(Base):
-    __tablename__ = "tenants"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(120), nullable=False)
-    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="ILS")
-    opening_balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    debts: Mapped[list["Debt"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
-    expected_incomes: Mapped[list["ExpectedIncome"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
-    recurring_expenses: Mapped[list["RecurringExpense"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
-    cash_events: Mapped[list["CashEvent"]] = relationship(back_populates="tenant", cascade="all, delete-orphan")
+def _parse_datetime(value) -> datetime:
+    if value is None or value == "":
+        return datetime.now()
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value))
 
 
-class Debt(Base):
-    __tablename__ = "debts"
+def _parse_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None or value == "":
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes", "y"}
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
-    creditor: Mapped[str] = mapped_column(String(200), nullable=False)
-    category: Mapped[str] = mapped_column(String(40), nullable=False, default="ספק")
-    original_amount: Mapped[float] = mapped_column(Float, nullable=False)
-    paid_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    due_date: Mapped[date] = mapped_column(Date, nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
-    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    tenant: Mapped[Tenant] = relationship(back_populates="debts")
+def _parse_int(value, default: int = 0) -> int:
+    if value is None or value == "":
+        return default
+    return int(float(value))
+
+
+def _parse_float(value, default: float = 0.0) -> float:
+    if value is None or value == "":
+        return default
+    return float(value)
+
+
+def _parse_optional_int(value) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(float(value))
+
+
+def _parse_optional_str(value) -> str | None:
+    if value is None or value == "":
+        return None
+    return str(value)
+
+
+def _date_to_str(d: date | None) -> str:
+    if d is None:
+        return ""
+    if isinstance(d, datetime):
+        return d.date().isoformat()
+    return d.isoformat()
+
+
+def _dt_to_str(dt: datetime | None) -> str:
+    if dt is None:
+        return ""
+    return dt.isoformat()
+
+
+@dataclass
+class Tenant:
+    id: int
+    name: str
+    currency: str = "ILS"
+    opening_balance: float = 0.0
+    notes: str | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+    TABLE = "tenants"
+    HEADERS = ("id", "name", "currency", "opening_balance", "notes", "created_at")
+
+    @classmethod
+    def from_row(cls, row: dict) -> "Tenant":
+        return cls(
+            id=_parse_int(row.get("id")),
+            name=str(row.get("name") or ""),
+            currency=str(row.get("currency") or "ILS"),
+            opening_balance=_parse_float(row.get("opening_balance")),
+            notes=_parse_optional_str(row.get("notes")),
+            created_at=_parse_datetime(row.get("created_at")),
+        )
+
+    def to_row(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "currency": self.currency,
+            "opening_balance": self.opening_balance,
+            "notes": self.notes or "",
+            "created_at": _dt_to_str(self.created_at),
+        }
+
+
+@dataclass
+class Debt:
+    id: int
+    tenant_id: int
+    creditor: str
+    category: str = "ספק"
+    original_amount: float = 0.0
+    paid_amount: float = 0.0
+    due_date: date = field(default_factory=date.today)
+    status: str = "open"
+    notes: str | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+    TABLE = "debts"
+    HEADERS = (
+        "id", "tenant_id", "creditor", "category", "original_amount",
+        "paid_amount", "due_date", "status", "notes", "created_at",
+    )
+
+    @classmethod
+    def from_row(cls, row: dict) -> "Debt":
+        return cls(
+            id=_parse_int(row.get("id")),
+            tenant_id=_parse_int(row.get("tenant_id")),
+            creditor=str(row.get("creditor") or ""),
+            category=str(row.get("category") or "ספק"),
+            original_amount=_parse_float(row.get("original_amount")),
+            paid_amount=_parse_float(row.get("paid_amount")),
+            due_date=_parse_date(row.get("due_date")),
+            status=str(row.get("status") or "open"),
+            notes=_parse_optional_str(row.get("notes")),
+            created_at=_parse_datetime(row.get("created_at")),
+        )
+
+    def to_row(self) -> dict:
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "creditor": self.creditor,
+            "category": self.category,
+            "original_amount": self.original_amount,
+            "paid_amount": self.paid_amount,
+            "due_date": _date_to_str(self.due_date),
+            "status": self.status,
+            "notes": self.notes or "",
+            "created_at": _dt_to_str(self.created_at),
+        }
 
     @property
     def remaining(self) -> float:
         return max(self.original_amount - self.paid_amount, 0.0)
 
 
-class ExpectedIncome(Base):
-    __tablename__ = "expected_incomes"
+@dataclass
+class ExpectedIncome:
+    id: int
+    tenant_id: int
+    source: str
+    amount: float = 0.0
+    expected_date: date = field(default_factory=date.today)
+    probability: int = 100
+    status: str = "pending"
+    notes: str | None = None
+    created_at: datetime = field(default_factory=datetime.now)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
-    source: Mapped[str] = mapped_column(String(200), nullable=False)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
-    expected_date: Mapped[date] = mapped_column(Date, nullable=False)
-    probability: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    TABLE = "expected_incomes"
+    HEADERS = (
+        "id", "tenant_id", "source", "amount", "expected_date",
+        "probability", "status", "notes", "created_at",
+    )
 
-    tenant: Mapped[Tenant] = relationship(back_populates="expected_incomes")
+    @classmethod
+    def from_row(cls, row: dict) -> "ExpectedIncome":
+        return cls(
+            id=_parse_int(row.get("id")),
+            tenant_id=_parse_int(row.get("tenant_id")),
+            source=str(row.get("source") or ""),
+            amount=_parse_float(row.get("amount")),
+            expected_date=_parse_date(row.get("expected_date")),
+            probability=_parse_int(row.get("probability"), default=100),
+            status=str(row.get("status") or "pending"),
+            notes=_parse_optional_str(row.get("notes")),
+            created_at=_parse_datetime(row.get("created_at")),
+        )
+
+    def to_row(self) -> dict:
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "source": self.source,
+            "amount": self.amount,
+            "expected_date": _date_to_str(self.expected_date),
+            "probability": self.probability,
+            "status": self.status,
+            "notes": self.notes or "",
+            "created_at": _dt_to_str(self.created_at),
+        }
 
     @property
     def expected_value(self) -> float:
         return self.amount * (self.probability / 100.0)
 
 
-class RecurringExpense(Base):
-    __tablename__ = "recurring_expenses"
+@dataclass
+class RecurringExpense:
+    id: int
+    tenant_id: int
+    name: str
+    category: str = "קבועות"
+    amount: float = 0.0
+    frequency: str = "monthly"
+    day_of_month: int = 1
+    active: bool = True
+    notes: str | None = None
+    created_at: datetime = field(default_factory=datetime.now)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
-    category: Mapped[str] = mapped_column(String(40), nullable=False, default="קבועות")
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
-    frequency: Mapped[str] = mapped_column(String(20), nullable=False, default="monthly")
-    day_of_month: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    active: Mapped[bool] = mapped_column(default=True)
-    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    TABLE = "recurring_expenses"
+    HEADERS = (
+        "id", "tenant_id", "name", "category", "amount", "frequency",
+        "day_of_month", "active", "notes", "created_at",
+    )
 
-    tenant: Mapped[Tenant] = relationship(back_populates="recurring_expenses")
+    @classmethod
+    def from_row(cls, row: dict) -> "RecurringExpense":
+        return cls(
+            id=_parse_int(row.get("id")),
+            tenant_id=_parse_int(row.get("tenant_id")),
+            name=str(row.get("name") or ""),
+            category=str(row.get("category") or "קבועות"),
+            amount=_parse_float(row.get("amount")),
+            frequency=str(row.get("frequency") or "monthly"),
+            day_of_month=_parse_int(row.get("day_of_month"), default=1),
+            active=_parse_bool(row.get("active")) if row.get("active") not in (None, "") else True,
+            notes=_parse_optional_str(row.get("notes")),
+            created_at=_parse_datetime(row.get("created_at")),
+        )
+
+    def to_row(self) -> dict:
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "name": self.name,
+            "category": self.category,
+            "amount": self.amount,
+            "frequency": self.frequency,
+            "day_of_month": self.day_of_month,
+            "active": "TRUE" if self.active else "FALSE",
+            "notes": self.notes or "",
+            "created_at": _dt_to_str(self.created_at),
+        }
 
 
-class CashEvent(Base):
-    __tablename__ = "cash_events"
+@dataclass
+class CashEvent:
+    id: int
+    tenant_id: int
+    date: date = field(default_factory=date.today)
+    direction: str = "in"
+    amount: float = 0.0
+    description: str = ""
+    source_type: str = "manual"
+    source_id: int | None = None
+    created_at: datetime = field(default_factory=datetime.now)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
-    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
-    direction: Mapped[str] = mapped_column(String(8), nullable=False)
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
-    description: Mapped[str] = mapped_column(String(300), nullable=False, default="")
-    source_type: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")
-    source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    TABLE = "cash_events"
+    HEADERS = (
+        "id", "tenant_id", "date", "direction", "amount", "description",
+        "source_type", "source_id", "created_at",
+    )
 
-    tenant: Mapped[Tenant] = relationship(back_populates="cash_events")
+    @classmethod
+    def from_row(cls, row: dict) -> "CashEvent":
+        return cls(
+            id=_parse_int(row.get("id")),
+            tenant_id=_parse_int(row.get("tenant_id")),
+            date=_parse_date(row.get("date")),
+            direction=str(row.get("direction") or "in"),
+            amount=_parse_float(row.get("amount")),
+            description=str(row.get("description") or ""),
+            source_type=str(row.get("source_type") or "manual"),
+            source_id=_parse_optional_int(row.get("source_id")),
+            created_at=_parse_datetime(row.get("created_at")),
+        )
+
+    def to_row(self) -> dict:
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "date": _date_to_str(self.date),
+            "direction": self.direction,
+            "amount": self.amount,
+            "description": self.description,
+            "source_type": self.source_type,
+            "source_id": self.source_id if self.source_id is not None else "",
+            "created_at": _dt_to_str(self.created_at),
+        }
+
+
+ALL_MODELS = (Tenant, Debt, ExpectedIncome, RecurringExpense, CashEvent)
+SCHEMA: dict[str, tuple[str, ...]] = {m.TABLE: m.HEADERS for m in ALL_MODELS}

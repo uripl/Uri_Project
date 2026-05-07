@@ -5,17 +5,15 @@ from datetime import date, timedelta
 
 from core import repository as repo
 from core.db import init_db
-from core.models import CashEvent, Debt, ExpectedIncome, RecurringExpense, Tenant
 
 
 def seed() -> None:
     init_db()
 
-    with repo.get_session() as s:
-        existing = s.query(Tenant).filter(Tenant.name == "עסק לדוגמה").first()
-        if existing is not None:
-            print(f"Demo tenant already exists (id={existing.id}). Skipping seed.")
-            return
+    existing = next((t for t in repo.list_tenants() if t.name == "עסק לדוגמה"), None)
+    if existing is not None:
+        print(f"Demo tenant already exists (id={existing.id}). Skipping seed.")
+        return
 
     tenant = repo.create_tenant(
         name="עסק לדוגמה",

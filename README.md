@@ -22,7 +22,8 @@
 
 ```
 core/        # שכבת הנתונים והחישובים
-  db.py
+  db.py            # אתחול ה-Store (Sheets בפרודקשן, MemoryStore בטסטים)
+  store.py         # שכבת אחסון: SheetsStore, MemoryStore
   models.py        # Tenant, Debt, ExpectedIncome, RecurringExpense, CashEvent
   repository.py    # שאילתות מסוננות לפי tenant_id (enforcement)
   forecast.py      # cumulative_cash_curve, zero_crossing_date, aging_buckets
@@ -31,17 +32,34 @@ ui/          # רכיבי UI משותפים
   rtl.py
   tenant_selector.py
 pages/       # 6 דפי Streamlit
-data/        # SQLite DB (gitignored)
-tests/       # pytest על forecast
+tests/       # pytest על forecast (משתמש ב-MemoryStore — אין צורך ב-credentials)
 seed.py      # יצירת לקוח דמו עם נתונים
 app.py       # entry point
 ```
+
+## אחסון נתונים
+
+הפרויקט משתמש ב-**Google Sheets** כ-DB. החלוקה: workbook אחד עם 5 גליונות
+(tenants / debts / expected_incomes / recurring_expenses / cash_events).
+כשמשתנים credentials, האפליקציה יוצרת את ה-workbook אוטומטית במייל של
+ה-Service Account. אם לא נמצאו credentials כלל (למשל בטסטים) — נופל ל-
+`MemoryStore` בזיכרון.
+
+### הקמה ראשונה (חד-פעמית)
+
+1. **Google Cloud:** ב-[console.cloud.google.com](https://console.cloud.google.com),
+   צור פרויקט חדש, הפעל את **Google Sheets API** ואת **Google Drive API**.
+2. **Service Account:** צור Service Account, הורד את ה-JSON.
+3. **Streamlit secrets:** העתק את התוכן ל-`.streamlit/secrets.toml`
+   (ראה `.streamlit/secrets.toml.example`).
+4. **שיתוף:** הוסף את כתובת ה-Gmail שלך ב-`editor_email` כדי שתקבל גישה
+   אוטומטית ל-workbook שייווצר.
 
 ## הרצה
 
 ```bash
 pip install -r requirements.txt
-python seed.py            # יוצר data/app.db עם לקוח דמו ונתונים סינתטיים
+python seed.py            # מאכלס את הגליון בלקוח דמו ונתונים סינתטיים
 streamlit run app.py
 ```
 
@@ -54,7 +72,8 @@ pytest
 ```
 
 הטסטים מכסים את עקומת התזרים, חישוב Aging, רישום תנועה אוטומטי בסימון
-חוב כשולם, ובידוד נתונים בין לקוחות.
+חוב כשולם, ובידוד נתונים בין לקוחות. הם רצים כנגד `MemoryStore` בלבד —
+אין צורך ב-credentials של גוגל כדי להריץ את ה-suite.
 
 ## עקרונות ארכיטקטוניים
 

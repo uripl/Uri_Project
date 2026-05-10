@@ -4,6 +4,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 
 
+_DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%d.%m.%Y", "%d-%m-%Y")
+
+
 def _parse_date(value) -> date:
     if value is None or value == "":
         return date.today()
@@ -11,7 +14,17 @@ def _parse_date(value) -> date:
         return value
     if isinstance(value, datetime):
         return value.date()
-    return date.fromisoformat(str(value))
+    s = str(value).strip()
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        pass
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"Cannot parse date: {value!r}")
 
 
 def _parse_optional_date(value) -> date | None:
@@ -25,7 +38,19 @@ def _parse_datetime(value) -> datetime:
         return datetime.now()
     if isinstance(value, datetime):
         return value
-    return datetime.fromisoformat(str(value))
+    s = str(value).strip()
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        pass
+    # Fall back to date-only formats; datetimes are auxiliary metadata, so a
+    # graceful fallback to midnight is fine if the cell got truncated by Sheets.
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return datetime.now()
 
 
 def _parse_bool(value) -> bool:
@@ -261,6 +286,62 @@ class RecurringExpense:
 
 
 @dataclass
+class RecurringIncome:
+    id: int
+    tenant_id: int
+    source: str
+    category: str = "הכנסה"
+    amount: float = 0.0
+    frequency: str = "monthly"
+    day_of_month: int = 1
+    probability: int = 100
+    active: bool = True
+    notes: str | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+    TABLE = "recurring_incomes"
+    HEADERS = (
+        "id", "tenant_id", "source", "category", "amount", "frequency",
+        "day_of_month", "probability", "active", "notes", "created_at",
+    )
+
+    @classmethod
+    def from_row(cls, row: dict) -> "RecurringIncome":
+        return cls(
+            id=_parse_int(row.get("id")),
+            tenant_id=_parse_int(row.get("tenant_id")),
+            source=str(row.get("source") or ""),
+            category=str(row.get("category") or "הכנסה"),
+            amount=_parse_float(row.get("amount")),
+            frequency=str(row.get("frequency") or "monthly"),
+            day_of_month=_parse_int(row.get("day_of_month"), default=1),
+            probability=_parse_int(row.get("probability"), default=100),
+            active=_parse_bool(row.get("active")) if row.get("active") not in (None, "") else True,
+            notes=_parse_optional_str(row.get("notes")),
+            created_at=_parse_datetime(row.get("created_at")),
+        )
+
+    def to_row(self) -> dict:
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "source": self.source,
+            "category": self.category,
+            "amount": self.amount,
+            "frequency": self.frequency,
+            "day_of_month": self.day_of_month,
+            "probability": self.probability,
+            "active": "TRUE" if self.active else "FALSE",
+            "notes": self.notes or "",
+            "created_at": _dt_to_str(self.created_at),
+        }
+
+    @property
+    def expected_value(self) -> float:
+        return self.amount * (self.probability / 100.0)
+
+
+@dataclass
 class CashEvent:
     id: int
     tenant_id: int
@@ -306,5 +387,5 @@ class CashEvent:
         }
 
 
-ALL_MODELS = (Tenant, Debt, ExpectedIncome, RecurringExpense, CashEvent)
+ALL_MODELS = (Tenant, Debt, ExpectedIncome, RecurringExpense, RecurringIncome, CashEvent)
 SCHEMA: dict[str, tuple[str, ...]] = {m.TABLE: m.HEADERS for m in ALL_MODELS}

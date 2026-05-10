@@ -29,6 +29,7 @@ def fmt_date(d: date | datetime | None) -> str:
 
 DEBT_CATEGORIES = ["ספק", "הלוואה", "מס", "כרטיס אשראי", "אחר"]
 EXPENSE_CATEGORIES = ["שכירות", "משכורות", "קבועות", "תפעול", "אחר"]
+INCOME_CATEGORIES = ["חוזה חודשי", "ריטיינר", "שכירות מושכרת", "ריבית/השקעה", "אחר"]
 INCOME_STATUSES = {"pending": "צפוי", "received": "התקבל", "cancelled": "בוטל"}
 DEBT_STATUSES = {"open": "פתוח", "paid": "שולם", "overdue": "באיחור"}
 FREQUENCIES = {"monthly": "חודשי", "weekly": "שבועי"}

@@ -88,7 +88,7 @@ class SheetsStore:
             headers_list = list(headers)
             if table not in existing:
                 ws = self._ss.add_worksheet(title=table, rows=200, cols=max(len(headers_list), 5))
-                ws.update("A1", [headers_list])
+                ws.update(values=[headers_list], range_name="A1", value_input_option="RAW")
                 try:
                     ws.freeze(rows=1)
                 except Exception:
@@ -97,7 +97,7 @@ class SheetsStore:
                 ws = existing[table]
                 current = ws.row_values(1)
                 if current != headers_list:
-                    ws.update("A1", [headers_list])
+                    ws.update(values=[headers_list], range_name="A1", value_input_option="RAW")
                     try:
                         ws.freeze(rows=1)
                     except Exception:
@@ -173,7 +173,7 @@ class SheetsStore:
                 continue
         full_row = {**fields, "id": next_id}
         values = [_serialize_cell(full_row.get(h, "")) for h in headers]
-        ws.append_row(values, value_input_option="USER_ENTERED")
+        ws.append_row(values, value_input_option="RAW")
         return full_row
 
     def update(self, table: str, row_id: int, fields: dict) -> None:
@@ -182,11 +182,18 @@ class SheetsStore:
             raise KeyError(f"No row with id={row_id} in {table}")
         ws = self._ws(table)
         headers = list(SCHEMA[table])
+        # Batch all cell updates for this row into a single API call (RAW mode
+        # so dates/datetimes round-trip as the literal strings we wrote).
+        import gspread.utils as _gsu
+        batch = []
         for key, val in fields.items():
             if key == "id" or key not in headers:
                 continue
             col = headers.index(key) + 1
-            ws.update_cell(idx, col, _serialize_cell(val))
+            a1 = _gsu.rowcol_to_a1(idx, col)
+            batch.append({"range": a1, "values": [[_serialize_cell(val)]]})
+        if batch:
+            ws.batch_update(batch, value_input_option="RAW")
 
     def delete(self, table: str, row_id: int) -> None:
         idx = self._find_row_index(table, row_id)

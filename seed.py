@@ -36,15 +36,19 @@ def seed() -> None:
         repo.create_debt(tid, **d, paid_amount=0.0, status="open")
 
     incomes = [
-        dict(source="חברת אלפא בע\"מ - חוזה חודשי", amount=14_000, expected_date=today + timedelta(days=10), probability=100),
         dict(source="לקוח בטא - פרויקט", amount=22_000, expected_date=today + timedelta(days=25), probability=80),
         dict(source="לקוח גמא - חשבונית פתוחה", amount=8_500, expected_date=today + timedelta(days=40), probability=70),
-        dict(source="חברת אלפא בע\"מ - חוזה חודשי", amount=14_000, expected_date=today + timedelta(days=40), probability=100),
-        dict(source="חברת אלפא בע\"מ - חוזה חודשי", amount=14_000, expected_date=today + timedelta(days=70), probability=100),
         dict(source="הצעת מחיר חדשה", amount=18_000, expected_date=today + timedelta(days=60), probability=40),
     ]
     for i in incomes:
         repo.create_expected_income(tid, **i, status="pending")
+
+    recurring_incomes = [
+        dict(source="חברת אלפא בע\"מ - חוזה חודשי", category="חוזה חודשי", amount=14_000, frequency="monthly", day_of_month=10, probability=100),
+        dict(source="ריטיינר - לקוח דלתא", category="ריטיינר", amount=4_800, frequency="monthly", day_of_month=1, probability=100),
+    ]
+    for ri in recurring_incomes:
+        repo.create_recurring_income(tid, **ri, active=True)
 
     recurring = [
         dict(name="שכירות משרד", category="שכירות", amount=6_500, frequency="monthly", day_of_month=1),
@@ -74,7 +78,8 @@ def seed() -> None:
 
     print(f"Seeded demo tenant '{tenant.name}' (id={tid})")
     print(f"  - {len(debts)} debts")
-    print(f"  - {len(incomes)} expected incomes")
+    print(f"  - {len(incomes)} expected (one-off) incomes")
+    print(f"  - {len(recurring_incomes)} recurring incomes")
     print(f"  - {len(recurring)} recurring expenses")
     print(f"  - 2 manual cash events")
 

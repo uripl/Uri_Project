@@ -8,6 +8,7 @@ from core.models import (
     Debt,
     ExpectedIncome,
     RecurringExpense,
+    RecurringIncome,
     Tenant,
 )
 
@@ -66,7 +67,8 @@ def update_tenant(tenant_id: int, **fields) -> None:
 
 def delete_tenant(tenant_id: int) -> None:
     store = get_store()
-    for table in (Debt.TABLE, ExpectedIncome.TABLE, RecurringExpense.TABLE, CashEvent.TABLE):
+    for table in (Debt.TABLE, ExpectedIncome.TABLE, RecurringExpense.TABLE,
+                  RecurringIncome.TABLE, CashEvent.TABLE):
         store.delete_where(table, {"tenant_id": tenant_id})
     store.delete(Tenant.TABLE, tenant_id)
 
@@ -226,6 +228,47 @@ def delete_recurring_expense(tenant_id: int, expense_id: int) -> None:
     if get_recurring_expense(tenant_id, expense_id) is None:
         return
     get_store().delete(RecurringExpense.TABLE, expense_id)
+
+
+# Recurring incomes ------------------------------------------------------------
+
+def list_recurring_incomes(tenant_id: int, only_active: bool = False) -> list[RecurringIncome]:
+    rows = get_store().list_rows(RecurringIncome.TABLE)
+    items = [RecurringIncome.from_row(r) for r in rows if int(r.get("tenant_id", 0) or 0) == tenant_id]
+    if only_active:
+        items = [i for i in items if i.active]
+    items.sort(key=lambda i: i.source)
+    return items
+
+
+def get_recurring_income(tenant_id: int, income_id: int) -> RecurringIncome | None:
+    row = get_store().get_row(RecurringIncome.TABLE, income_id)
+    if row is None:
+        return None
+    income = RecurringIncome.from_row(row)
+    return income if income.tenant_id == tenant_id else None
+
+
+def create_recurring_income(tenant_id: int, **fields) -> RecurringIncome:
+    income = RecurringIncome(id=0, tenant_id=tenant_id, source="", created_at=datetime.now())
+    for k, v in fields.items():
+        setattr(income, k, v)
+    row = income.to_row()
+    row.pop("id", None)
+    inserted = get_store().insert(RecurringIncome.TABLE, row)
+    return RecurringIncome.from_row(inserted)
+
+
+def update_recurring_income(tenant_id: int, income_id: int, **fields) -> None:
+    if get_recurring_income(tenant_id, income_id) is None:
+        raise ValueError("Recurring income not found for this tenant")
+    get_store().update(RecurringIncome.TABLE, income_id, _serialize_fields(fields))
+
+
+def delete_recurring_income(tenant_id: int, income_id: int) -> None:
+    if get_recurring_income(tenant_id, income_id) is None:
+        return
+    get_store().delete(RecurringIncome.TABLE, income_id)
 
 
 # Cash events ------------------------------------------------------------------

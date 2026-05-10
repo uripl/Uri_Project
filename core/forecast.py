@@ -7,7 +7,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from core import repository as repo
-from core.models import Debt, ExpectedIncome, RecurringExpense
+from core.models import Debt, ExpectedIncome, RecurringExpense, RecurringIncome
 
 AGING_BUCKETS = ["0-30", "31-60", "61-90", "90+"]
 
@@ -25,18 +25,20 @@ def _last_day_of_month(year: int, month: int) -> int:
 
 
 def _generate_recurring_dates(
-    expense: RecurringExpense, start: date, end: date
+    item, start: date, end: date
 ) -> list[date]:
-    """Generate occurrence dates for a recurring expense within [start, end]."""
-    if not expense.active:
+    """Generate occurrence dates for a recurring expense or recurring income
+    within [start, end]. Both types share the same `frequency` and `day_of_month`
+    semantics."""
+    if not item.active:
         return []
 
     occurrences: list[date] = []
 
-    if expense.frequency == "monthly":
+    if item.frequency == "monthly":
         year, month = start.year, start.month
         while True:
-            day = min(expense.day_of_month or 1, _last_day_of_month(year, month))
+            day = min(item.day_of_month or 1, _last_day_of_month(year, month))
             try:
                 occ = date(year, month, day)
             except ValueError:
@@ -50,9 +52,9 @@ def _generate_recurring_dates(
             else:
                 month += 1
 
-    elif expense.frequency == "weekly":
+    elif item.frequency == "weekly":
         # day_of_month interpreted as weekday: 1=Monday .. 7=Sunday
-        target_weekday = ((expense.day_of_month or 1) - 1) % 7  # 0=Monday
+        target_weekday = ((item.day_of_month or 1) - 1) % 7  # 0=Monday
         cur = start
         while cur.weekday() != target_weekday:
             cur += timedelta(days=1)
@@ -83,6 +85,7 @@ def cumulative_cash_curve(
     debts: list[Debt] = repo.list_debts(tenant_id, only_open=True)
     incomes: list[ExpectedIncome] = repo.list_expected_incomes(tenant_id, only_pending=True)
     expenses: list[RecurringExpense] = repo.list_recurring_expenses(tenant_id, only_active=True)
+    recurring_incomes: list[RecurringIncome] = repo.list_recurring_incomes(tenant_id, only_active=True)
 
     days = pd.date_range(start_date, end_date, freq="D").date
     df = pd.DataFrame({"date": days})
@@ -110,6 +113,11 @@ def cumulative_cash_curve(
         for occ in _generate_recurring_dates(expense, start_date, end_date):
             idx = date_to_idx[occ]
             df.at[idx, "delta_out"] += expense.amount
+
+    for ri in recurring_incomes:
+        for occ in _generate_recurring_dates(ri, start_date, end_date):
+            idx = date_to_idx[occ]
+            df.at[idx, "delta_in"] += ri.amount * (ri.probability / 100.0)
 
     df["net"] = df["delta_in"] - df["delta_out"]
     df["balance"] = opening + df["net"].cumsum()
@@ -188,11 +196,16 @@ def expected_income_30d(tenant_id: int, as_of: date | None = None) -> float:
     if as_of is None:
         as_of = date.today()
     horizon = as_of + timedelta(days=30)
-    return sum(
+    one_off = sum(
         i.amount * (i.probability / 100.0)
         for i in repo.list_expected_incomes(tenant_id, only_pending=True)
         if as_of <= i.expected_date <= horizon
     )
+    recurring = 0.0
+    for ri in repo.list_recurring_incomes(tenant_id, only_active=True):
+        for _ in _generate_recurring_dates(ri, as_of, horizon):
+            recurring += ri.amount * (ri.probability / 100.0)
+    return one_off + recurring
 
 
 def runway_months(tenant_id: int, as_of: date | None = None) -> float | None:

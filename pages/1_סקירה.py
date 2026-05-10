@@ -78,7 +78,7 @@ fig.add_hline(y=0, line=dict(color="#cf222e", width=2, dash="dash"))
 
 if zero_date is not None:
     fig.add_vline(
-        x=zero_date,
+        x=zero_date.isoformat(),
         line=dict(color="#cf222e", width=2, dash="dot"),
         annotation_text="חציית 0",
         annotation_position="top",

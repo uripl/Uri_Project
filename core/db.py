@@ -1,6 +1,6 @@
-"""Backend wiring: lazy-construct a `Store`, defaulting to Sheets if credentials exist
-and falling back to an in-process MemoryStore otherwise (useful for tests and local
-exploration without Google credentials)."""
+"""Backend wiring: lazy-construct a `Store`. With credentials present, build a
+SheetsStore — and surface any failure loudly. With no credentials at all, fall
+back silently to MemoryStore (used by tests and local exploration)."""
 from __future__ import annotations
 
 import os
@@ -15,6 +15,7 @@ _GOOGLE_SCOPES = [
 ]
 
 _store: Optional[Store] = None
+_last_sheets_error: Optional[str] = None
 
 
 def _read_streamlit_secret(key: str):
@@ -66,18 +67,27 @@ def _get_spreadsheet_id() -> str | None:
     return os.environ.get("SPREADSHEET_ID") or None
 
 
-def _build_sheets_store() -> SheetsStore | None:
-    """Construct a SheetsStore using a service account.
+def _friendly_error(exc: Exception) -> str:
+    """Translate common Google API errors into actionable Hebrew messages."""
+    msg = str(exc)
+    low = msg.lower()
+    if "drive" in low and ("has not been used" in low or "is disabled" in low or "accessnotconfigured" in low):
+        return ("Google Drive API לא מופעל בפרויקט הזה. "
+                "כנסי ל-console.cloud.google.com → APIs & Services → Library → "
+                "חפשי 'Google Drive API' → Enable, ואז עשי Reboot לאפליקציה.")
+    if "sheets" in low and ("has not been used" in low or "is disabled" in low or "accessnotconfigured" in low):
+        return ("Google Sheets API לא מופעל בפרויקט הזה. "
+                "כנסי ל-console.cloud.google.com → APIs & Services → Library → "
+                "חפשי 'Google Sheets API' → Enable, ואז עשי Reboot לאפליקציה.")
+    if "invalid_grant" in low or "invalid jwt" in low:
+        return ("המפתח של ה-Service Account לא תקין. ודאי שה-private_key הועתק שלם, "
+                "כולל ה-`\\n` בסוף וב-BEGIN/END שורות.")
+    if "permission" in low or "forbidden" in low:
+        return f"בעיית הרשאות מול גוגל: {msg}"
+    return msg
 
-    Resolution order for the workbook:
-      1) `spreadsheet_id` from secrets/env — open by ID
-      2) Search the service account's Drive for a workbook named `spreadsheet_name`
-      3) Create a new workbook with that name and share it with `editor_email` if set
-    """
-    info = _get_service_account_info()
-    if info is None:
-        return None
 
+def _build_sheets_store_from_info(info: dict) -> SheetsStore:
     try:
         import gspread
         from google.oauth2.service_account import Credentials
@@ -100,10 +110,19 @@ def _build_sheets_store() -> SheetsStore | None:
             spreadsheet = client.create(name)
             editor = _get_editor_email()
             if editor:
+                # Sharing failures are non-fatal — the workbook still exists in
+                # the service account's Drive — but we want them visible.
                 try:
                     spreadsheet.share(editor, perm_type="user", role="writer", notify=False)
-                except Exception:
-                    pass
+                except Exception as share_err:
+                    try:
+                        import streamlit as st
+                        st.warning(
+                            f"⚠️ הגליון נוצר אך השיתוף עם {editor} נכשל: {share_err}. "
+                            "תוכלי להוסיף אותו ידנית ב-Drive של ה-Service Account."
+                        )
+                    except Exception:
+                        pass
 
     store = SheetsStore(spreadsheet)
     store.ensure_schema()
@@ -111,22 +130,59 @@ def _build_sheets_store() -> SheetsStore | None:
 
 
 def get_store() -> Store:
-    """Return the active Store. Built lazily on first call."""
-    global _store
-    if _store is None:
-        sheets = None
+    """Return the active Store. Built lazily on first call.
+
+    Behavior:
+      - No credentials configured at all → silent fallback to MemoryStore
+        (intended for tests and local exploration).
+      - Credentials configured but Sheets connection failed → fallback to
+        MemoryStore *and* show a loud error in the Streamlit UI so the
+        user knows their data is not being persisted.
+    """
+    global _store, _last_sheets_error
+    if _store is not None:
+        return _store
+
+    info = _get_service_account_info()
+    if info is None:
+        _store = MemoryStore()
+        return _store
+
+    try:
+        _store = _build_sheets_store_from_info(info)
+        _last_sheets_error = None
+    except Exception as e:
+        _last_sheets_error = _friendly_error(e)
         try:
-            sheets = _build_sheets_store()
+            import streamlit as st
+            st.error(
+                f"⚠️ לא הצלחתי להתחבר ל-Google Sheets:\n\n**{_last_sheets_error}**\n\n"
+                "האפליקציה ממשיכה לרוץ במצב זיכרון בלבד — **הנתונים יימחקו ב-reboot הבא**. "
+                "תקני את הבעיה למעלה ועשי Reboot כדי להתחבר לגליון אמיתי."
+            )
         except Exception:
-            sheets = None
-        _store = sheets if sheets is not None else MemoryStore()
+            pass
+        _store = MemoryStore()
+
     return _store
+
+
+def last_sheets_error() -> Optional[str]:
+    """Returns the last connection error message, if any. Used by the UI to
+    render a persistent banner."""
+    return _last_sheets_error
+
+
+def is_persistent() -> bool:
+    """True if the active store actually persists across restarts (i.e. Sheets)."""
+    return isinstance(_store, SheetsStore)
 
 
 def reset_store() -> None:
     """Drop the cached store. Used by tests and after configuration changes."""
-    global _store
+    global _store, _last_sheets_error
     _store = None
+    _last_sheets_error = None
 
 
 def set_store(store: Store) -> None:

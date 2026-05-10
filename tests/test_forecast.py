@@ -195,6 +195,24 @@ def test_schedule_installments_splits_remaining_evenly(tenant):
         assert inst.amount == pytest.approx(3_000.0)
 
 
+def test_overdue_scheduled_installment_pulls_forward_to_curve_start(tenant):
+    """When the matrix planner places an installment on the 1st of the current
+    month and today is later, the forecast should still show the planned amount
+    (pulled forward to day 0) rather than dropping it silently."""
+    today = date.today()
+    debt = repo.create_debt(
+        tenant.id, creditor="ספק", category="ספק", original_amount=5_000.0,
+        paid_amount=0.0, due_date=today + timedelta(days=30), status="open",
+    )
+    # An installment dated 10 days ago (still scheduled, not paid).
+    repo.create_debt_installment(
+        tenant.id, debt.id, due_date=today - timedelta(days=10), amount=2_000.0,
+    )
+    df = forecast.cumulative_cash_curve(tenant.id, start_date=today, horizon_days=30)
+    assert df.iloc[0]["balance"] == 8_000.0   # 10000 - 2000 (pulled to today)
+    assert df.iloc[15]["balance"] == 8_000.0  # stays flat after
+
+
 def test_marking_installment_paid_records_cash_event_and_updates_debt(tenant):
     today = date.today()
     debt = repo.create_debt(

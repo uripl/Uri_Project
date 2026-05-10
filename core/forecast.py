@@ -98,10 +98,17 @@ def cumulative_cash_curve(
         installments = repo.list_debt_installments(tenant_id, debt.id, only_pending=True)
         if installments:
             # Debt has a payment plan: schedule each pending installment.
+            # If a scheduled installment's date has already passed (e.g. it was
+            # planned for the 1st but today is the 10th), pull it forward to the
+            # start of the curve so the planned amount still shows up.
             for inst in installments:
-                if start_date <= inst.due_date <= end_date:
+                if inst.due_date < start_date:
+                    idx = 0
+                elif inst.due_date > end_date:
+                    continue
+                else:
                     idx = date_to_idx[inst.due_date]
-                    df.at[idx, "delta_out"] += inst.amount
+                df.at[idx, "delta_out"] += inst.amount
             continue
         # No plan: only project as a single payment if the due date is still
         # in the future. Past-due debts without a plan are tracked in KPIs but

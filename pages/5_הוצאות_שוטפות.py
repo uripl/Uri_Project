@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from core import repository as repo
-from core.formatting import EXPENSE_CATEGORIES, FREQUENCIES, fmt_currency
+from core.formatting import EXPENSE_CATEGORIES, FREQUENCIES, fmt_currency, money_format
 from ui.rtl import apply_rtl
 from ui.tenant_selector import require_tenant
 
@@ -39,7 +39,7 @@ if expenses:
         df.drop(columns=["id"]),
         use_container_width=True,
         hide_index=True,
-        column_config={"סכום": st.column_config.NumberColumn(format="₪%.0f")},
+        column_config={"סכום": st.column_config.NumberColumn(format=money_format())},
     )
 
     monthly_total = sum(
@@ -90,8 +90,8 @@ with st.form("add_expense", clear_on_submit=True):
 
 st.divider()
 
-# Toggle / delete ----------------------------------------------------------
-st.subheader("ניהול הוצאות")
+# Manage -------------------------------------------------------------------
+st.subheader("ניהול הוצאה קיימת")
 if not expenses:
     st.caption("אין הוצאות לפעולה.")
 else:
@@ -100,13 +100,69 @@ else:
     expense_id = options[label]
     expense = next(e for e in expenses if e.id == expense_id)
 
-    c1, c2 = st.columns(2)
-    if c1.button("הפעל" if not expense.active else "השבת", type="primary"):
-        repo.update_recurring_expense(tenant_id, expense_id, active=not expense.active)
-        st.success("עודכן.")
-        st.rerun()
+    tab_quick, tab_edit = st.tabs(["פעולות מהירות", "עריכה מלאה"])
 
-    if c2.button("מחק"):
-        repo.delete_recurring_expense(tenant_id, expense_id)
-        st.success("נמחק.")
-        st.rerun()
+    with tab_quick:
+        c1, c2 = st.columns(2)
+        if c1.button("הפעל" if not expense.active else "השבת", type="primary", key="exp_toggle"):
+            repo.update_recurring_expense(tenant_id, expense_id, active=not expense.active)
+            st.success("עודכן.")
+            st.rerun()
+
+        if c2.button("מחק", key="exp_delete"):
+            repo.delete_recurring_expense(tenant_id, expense_id)
+            st.success("נמחק.")
+            st.rerun()
+
+    with tab_edit:
+        with st.form("edit_expense"):
+            c1, c2 = st.columns(2)
+            e_name = c1.text_input("שם", value=expense.name, key="e_exp_name")
+            e_category = c2.selectbox(
+                "קטגוריה", EXPENSE_CATEGORIES,
+                index=EXPENSE_CATEGORIES.index(expense.category) if expense.category in EXPENSE_CATEGORIES else 0,
+                key="e_exp_cat",
+            )
+            c3, c4, c5 = st.columns(3)
+            e_amount = c3.number_input(
+                "סכום (₪)", min_value=0.0, step=100.0,
+                value=float(expense.amount), format="%.2f", key="e_exp_amount",
+            )
+            freqs = list(FREQUENCIES.keys())
+            e_freq = c4.selectbox(
+                "תדירות", freqs,
+                index=freqs.index(expense.frequency) if expense.frequency in freqs else 0,
+                format_func=lambda f: FREQUENCIES[f], key="e_exp_freq",
+            )
+            if e_freq == "monthly":
+                e_day = c5.number_input(
+                    "יום בחודש (1-31)", min_value=1, max_value=31,
+                    value=int(expense.day_of_month), key="e_exp_day_m",
+                )
+            else:
+                weekdays = list(range(1, 8))
+                e_day = c5.selectbox(
+                    "יום בשבוע", weekdays,
+                    index=(int(expense.day_of_month) - 1) % 7 if 1 <= int(expense.day_of_month) <= 7 else 0,
+                    format_func=lambda d: ["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"][d - 1],
+                    key="e_exp_day_w",
+                )
+            e_active = st.checkbox("פעיל", value=expense.active, key="e_exp_active")
+            e_notes = st.text_area("הערות", value=expense.notes or "", height=60, key="e_exp_notes")
+
+            if st.form_submit_button("שמור שינויים", type="primary"):
+                if not e_name.strip() or e_amount <= 0:
+                    st.error("שם וסכום חיוביים הם חובה.")
+                else:
+                    repo.update_recurring_expense(
+                        tenant_id, expense_id,
+                        name=e_name.strip(),
+                        category=e_category,
+                        amount=e_amount,
+                        frequency=e_freq,
+                        day_of_month=int(e_day),
+                        active=e_active,
+                        notes=e_notes.strip() or None,
+                    )
+                    st.success("עודכן.")
+                    st.rerun()

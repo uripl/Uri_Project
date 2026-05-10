@@ -143,6 +143,73 @@ def test_marking_debt_paid_creates_cash_event(tenant):
     assert repo.current_balance(tenant.id) == 9_500.0
 
 
+def test_overdue_debt_without_plan_is_not_in_curve(tenant):
+    today = date.today()
+    repo.create_debt(
+        tenant.id, creditor="חוב באיחור", category="ספק", original_amount=4_000.0,
+        paid_amount=0.0, due_date=today - timedelta(days=20), status="open",
+    )
+    df = forecast.cumulative_cash_curve(tenant.id, start_date=today, horizon_days=30)
+    # Without a payment plan, the overdue debt does not get dumped at day 0:
+    # it's a known liability without a scheduled payment, so the curve stays flat.
+    assert (df["balance"] == 10_000.0).all()
+
+
+def test_installments_drive_forecast_when_present(tenant):
+    today = date.today()
+    debt = repo.create_debt(
+        tenant.id, creditor="חוב עם הסדר", category="הלוואה", original_amount=6_000.0,
+        paid_amount=0.0, due_date=today - timedelta(days=5), status="open",
+    )
+    repo.create_debt_installment(
+        tenant.id, debt.id, due_date=today + timedelta(days=10), amount=2_000.0,
+    )
+    repo.create_debt_installment(
+        tenant.id, debt.id, due_date=today + timedelta(days=40), amount=2_000.0,
+    )
+    repo.create_debt_installment(
+        tenant.id, debt.id, due_date=today + timedelta(days=70), amount=2_000.0,
+    )
+    df = forecast.cumulative_cash_curve(tenant.id, start_date=today, horizon_days=90)
+    # Original due date is ignored; payments hit on installment dates.
+    assert df.iloc[9]["balance"] == 10_000.0
+    assert df.iloc[10]["balance"] == 8_000.0
+    assert df.iloc[40]["balance"] == 6_000.0
+    assert df.iloc[70]["balance"] == 4_000.0
+
+
+def test_schedule_installments_splits_remaining_evenly(tenant):
+    today = date.today()
+    debt = repo.create_debt(
+        tenant.id, creditor="חוב לפריסה", category="ספק", original_amount=12_000.0,
+        paid_amount=0.0, due_date=today + timedelta(days=10), status="open",
+    )
+    plan = repo.schedule_installments(
+        tenant.id, debt.id, count=4, first_date=today + timedelta(days=30),
+        frequency="monthly",
+    )
+    assert len(plan) == 4
+    assert sum(i.amount for i in plan) == pytest.approx(12_000.0)
+    # Each installment is 3000.
+    for inst in plan:
+        assert inst.amount == pytest.approx(3_000.0)
+
+
+def test_marking_installment_paid_records_cash_event_and_updates_debt(tenant):
+    today = date.today()
+    debt = repo.create_debt(
+        tenant.id, creditor="X", category="ספק", original_amount=2_000.0,
+        paid_amount=0.0, due_date=today + timedelta(days=10), status="open",
+    )
+    inst = repo.create_debt_installment(
+        tenant.id, debt.id, due_date=today, amount=800.0,
+    )
+    repo.mark_installment_paid(tenant.id, inst.id, payment_date=today)
+    refreshed_debt = repo.get_debt(tenant.id, debt.id)
+    assert refreshed_debt.paid_amount == pytest.approx(800.0)
+    assert repo.current_balance(tenant.id) == 9_200.0
+
+
 def test_tenants_are_isolated():
     a = repo.create_tenant(name="A", opening_balance=5_000.0)
     b = repo.create_tenant(name="B", opening_balance=8_000.0)

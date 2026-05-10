@@ -10,6 +10,7 @@ from core.formatting import (
     INCOME_STATUSES,
     fmt_currency,
     fmt_date,
+    money_format,
 )
 from ui.rtl import apply_rtl
 from ui.tenant_selector import require_tenant
@@ -46,8 +47,8 @@ with tab_one_off:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "סכום": st.column_config.NumberColumn(format="₪%.0f"),
-                "צפי משוקלל": st.column_config.NumberColumn(format="₪%.0f"),
+                "סכום": st.column_config.NumberColumn(format=money_format()),
+                "צפי משוקלל": st.column_config.NumberColumn(format=money_format()),
                 "תאריך צפוי": st.column_config.DateColumn(format="DD/MM/YYYY"),
                 "סבירות (%)": st.column_config.NumberColumn(format="%d%%"),
             },
@@ -89,7 +90,7 @@ with tab_one_off:
 
     st.divider()
 
-    st.subheader("פעולות על הכנסה קיימת")
+    st.subheader("ניהול הכנסה קיימת")
     if not incomes:
         st.caption("אין הכנסות לפעולה.")
     else:
@@ -98,23 +99,53 @@ with tab_one_off:
         income_id = options[label]
         income = next(i for i in incomes if i.id == income_id)
 
-        c1, c2, c3 = st.columns(3)
-        if c1.button("סמן כהתקבל", type="primary"):
-            repo.mark_income_received(tenant_id, income_id, received_date=today)
-            st.success("סומן כהתקבל ונרשמה תנועת מזומן.")
-            st.rerun()
-
-        if c2.button("מחק"):
-            repo.delete_expected_income(tenant_id, income_id)
-            st.success("נמחק.")
-            st.rerun()
-
-        with c3.expander("עדכן סבירות"):
-            new_prob = st.slider("סבירות חדשה", 0, 100, income.probability, 5, key=f"prob_{income_id}")
-            if st.button("עדכן", key=f"update_prob_{income_id}"):
-                repo.update_expected_income(tenant_id, income_id, probability=new_prob)
-                st.success("עודכן.")
+        tab_quick, tab_edit = st.tabs(["פעולות מהירות", "עריכה מלאה"])
+        with tab_quick:
+            c1, c2 = st.columns(2)
+            if c1.button("סמן כהתקבל", type="primary", key="oi_mark"):
+                repo.mark_income_received(tenant_id, income_id, received_date=today)
+                st.success("סומן כהתקבל ונרשמה תנועת מזומן.")
                 st.rerun()
+
+            if c2.button("מחק", key="oi_del"):
+                repo.delete_expected_income(tenant_id, income_id)
+                st.success("נמחק.")
+                st.rerun()
+
+        with tab_edit:
+            with st.form("edit_oi"):
+                c1, c2 = st.columns(2)
+                e_source = c1.text_input("מקור", value=income.source, key="e_oi_source")
+                e_amount = c2.number_input("סכום (₪)", min_value=0.0, step=100.0,
+                                            value=float(income.amount), format="%.2f",
+                                            key="e_oi_amount")
+                c3, c4 = st.columns(2)
+                e_date = c3.date_input("תאריך צפוי", value=income.expected_date, key="e_oi_date")
+                e_prob = c4.slider("סבירות (%)", 0, 100, value=int(income.probability),
+                                    step=5, key="e_oi_prob")
+                statuses = list(INCOME_STATUSES.keys())
+                e_status = st.selectbox(
+                    "סטטוס", statuses,
+                    index=statuses.index(income.status) if income.status in statuses else 0,
+                    format_func=lambda s: INCOME_STATUSES[s], key="e_oi_status",
+                )
+                e_notes = st.text_area("הערות", value=income.notes or "", height=70, key="e_oi_notes")
+
+                if st.form_submit_button("שמור שינויים", type="primary"):
+                    if not e_source.strip() or e_amount <= 0:
+                        st.error("מקור וסכום חיוביים הם חובה.")
+                    else:
+                        repo.update_expected_income(
+                            tenant_id, income_id,
+                            source=e_source.strip(),
+                            amount=e_amount,
+                            expected_date=e_date,
+                            probability=e_prob,
+                            status=e_status,
+                            notes=e_notes.strip() or None,
+                        )
+                        st.success("עודכן.")
+                        st.rerun()
 
 # =========================================================== Recurring incomes
 with tab_recurring:
@@ -146,7 +177,7 @@ with tab_recurring:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "סכום": st.column_config.NumberColumn(format="₪%.0f"),
+                "סכום": st.column_config.NumberColumn(format=money_format()),
                 "סבירות (%)": st.column_config.NumberColumn(format="%d%%"),
             },
         )
@@ -169,13 +200,14 @@ with tab_recurring:
 
         c3, c4, c5 = st.columns(3)
         amount = c3.number_input("סכום (₪)", min_value=0.0, step=100.0, format="%.2f", key="ri_amount")
-        frequency = c4.selectbox("תדירות", list(FREQUENCIES.keys()), format_func=lambda f: FREQUENCIES[f], key="ri_freq")
+        frequency = c4.selectbox("תדירות", list(FREQUENCIES.keys()),
+                                 format_func=lambda f: FREQUENCIES[f], key="ri_freq")
         if frequency == "monthly":
             day = c5.number_input("יום בחודש (1-31)", min_value=1, max_value=31, value=1, key="ri_day_m")
         else:
             day = c5.selectbox("יום בשבוע", options=list(range(1, 8)),
-                              format_func=lambda d: ["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"][d - 1],
-                              key="ri_day_w")
+                               format_func=lambda d: ["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"][d - 1],
+                               key="ri_day_w")
 
         c6, c7 = st.columns(2)
         probability = c6.slider("סבירות (%)", min_value=0, max_value=100, value=100, step=5, key="ri_prob")
@@ -211,13 +243,71 @@ with tab_recurring:
         ri_id = options[label]
         ri = next(i for i in rincomes if i.id == ri_id)
 
-        c1, c2 = st.columns(2)
-        if c1.button("הפעל" if not ri.active else "השבת", type="primary", key="ri_toggle"):
-            repo.update_recurring_income(tenant_id, ri_id, active=not ri.active)
-            st.success("עודכן.")
-            st.rerun()
+        tab_quick, tab_edit = st.tabs(["פעולות מהירות", "עריכה מלאה"])
+        with tab_quick:
+            c1, c2 = st.columns(2)
+            if c1.button("הפעל" if not ri.active else "השבת", type="primary", key="ri_toggle"):
+                repo.update_recurring_income(tenant_id, ri_id, active=not ri.active)
+                st.success("עודכן.")
+                st.rerun()
 
-        if c2.button("מחק", key="ri_delete"):
-            repo.delete_recurring_income(tenant_id, ri_id)
-            st.success("נמחק.")
-            st.rerun()
+            if c2.button("מחק", key="ri_delete"):
+                repo.delete_recurring_income(tenant_id, ri_id)
+                st.success("נמחק.")
+                st.rerun()
+
+        with tab_edit:
+            with st.form("edit_ri"):
+                c1, c2 = st.columns(2)
+                e_source = c1.text_input("מקור", value=ri.source, key="e_ri_source")
+                e_category = c2.selectbox(
+                    "קטגוריה", INCOME_CATEGORIES,
+                    index=INCOME_CATEGORIES.index(ri.category) if ri.category in INCOME_CATEGORIES else 0,
+                    key="e_ri_cat",
+                )
+                c3, c4, c5 = st.columns(3)
+                e_amount = c3.number_input(
+                    "סכום (₪)", min_value=0.0, step=100.0,
+                    value=float(ri.amount), format="%.2f", key="e_ri_amount",
+                )
+                freqs = list(FREQUENCIES.keys())
+                e_freq = c4.selectbox(
+                    "תדירות", freqs,
+                    index=freqs.index(ri.frequency) if ri.frequency in freqs else 0,
+                    format_func=lambda f: FREQUENCIES[f], key="e_ri_freq",
+                )
+                if e_freq == "monthly":
+                    e_day = c5.number_input(
+                        "יום בחודש (1-31)", min_value=1, max_value=31,
+                        value=int(ri.day_of_month), key="e_ri_day_m",
+                    )
+                else:
+                    weekdays = list(range(1, 8))
+                    e_day = c5.selectbox(
+                        "יום בשבוע", weekdays,
+                        index=(int(ri.day_of_month) - 1) % 7 if 1 <= int(ri.day_of_month) <= 7 else 0,
+                        format_func=lambda d: ["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"][d - 1],
+                        key="e_ri_day_w",
+                    )
+                c6, c7 = st.columns(2)
+                e_prob = c6.slider("סבירות (%)", 0, 100, value=int(ri.probability), step=5, key="e_ri_prob")
+                e_active = c7.checkbox("פעיל", value=ri.active, key="e_ri_active")
+                e_notes = st.text_area("הערות", value=ri.notes or "", height=60, key="e_ri_notes")
+
+                if st.form_submit_button("שמור שינויים", type="primary"):
+                    if not e_source.strip() or e_amount <= 0:
+                        st.error("מקור וסכום חיוביים הם חובה.")
+                    else:
+                        repo.update_recurring_income(
+                            tenant_id, ri_id,
+                            source=e_source.strip(),
+                            category=e_category,
+                            amount=e_amount,
+                            frequency=e_freq,
+                            day_of_month=int(e_day),
+                            probability=e_prob,
+                            active=e_active,
+                            notes=e_notes.strip() or None,
+                        )
+                        st.success("עודכן.")
+                        st.rerun()

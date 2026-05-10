@@ -3,8 +3,10 @@ from datetime import date
 import plotly.graph_objects as go
 import streamlit as st
 
+import pandas as pd
+
 from core import forecast, repository as repo
-from core.formatting import fmt_currency, fmt_date
+from core.formatting import fmt_currency, fmt_date, money_format
 from ui.rtl import apply_rtl
 from ui.tenant_selector import require_tenant
 
@@ -75,9 +77,9 @@ st.dataframe(
     hide_index=True,
     column_config={
         period_label: st.column_config.DateColumn(format="DD/MM/YYYY"),
-        "כניסות": st.column_config.NumberColumn(format="₪%.0f"),
-        "יציאות": st.column_config.NumberColumn(format="₪%.0f"),
-        "נטו": st.column_config.NumberColumn(format="₪%.0f"),
+        "כניסות": st.column_config.NumberColumn(format=money_format()),
+        "יציאות": st.column_config.NumberColumn(format=money_format()),
+        "נטו": st.column_config.NumberColumn(format=money_format()),
     },
 )
 
@@ -120,7 +122,6 @@ else:
         "תיאור": e.description,
         "מקור": e.source_type,
     } for e in events]
-    import pandas as pd
     df_events = pd.DataFrame(rows)
     st.dataframe(
         df_events.drop(columns=["id"]),
@@ -128,15 +129,49 @@ else:
         hide_index=True,
         column_config={
             "תאריך": st.column_config.DateColumn(format="DD/MM/YYYY"),
-            "סכום": st.column_config.NumberColumn(format="₪%.0f"),
+            "סכום": st.column_config.NumberColumn(format=money_format()),
         },
     )
 
-    delete_options = {f"{fmt_date(e.date)} — {e.description} ({fmt_currency(e.amount)})": e.id for e in events}
-    if delete_options:
-        with st.expander("מחיקת תנועה"):
-            label = st.selectbox("בחר תנועה למחיקה", list(delete_options.keys()))
-            if st.button("מחק", key="delete_cash_event"):
-                repo.delete_cash_event(tenant_id, delete_options[label])
-                st.success("נמחק.")
-                st.rerun()
+    st.divider()
+    st.subheader("ניהול תנועה קיימת")
+    options = {f"{fmt_date(e.date)} — {e.description} ({fmt_currency(e.amount)})": e.id for e in events}
+    label = st.selectbox("בחר תנועה", list(options.keys()))
+    event_id = options[label]
+    event = next(e for e in events if e.id == event_id)
+
+    tab_quick, tab_edit = st.tabs(["פעולות מהירות", "עריכה מלאה"])
+    with tab_quick:
+        if st.button("מחק תנועה", key="ce_delete"):
+            repo.delete_cash_event(tenant_id, event_id)
+            st.success("נמחק.")
+            st.rerun()
+
+    with tab_edit:
+        with st.form("edit_cash"):
+            c1, c2, c3 = st.columns(3)
+            e_dir = c1.selectbox(
+                "כיוון", ["in", "out"],
+                index=0 if event.direction == "in" else 1,
+                format_func=lambda x: "כניסה" if x == "in" else "יציאה",
+                key="e_ce_dir",
+            )
+            e_amount = c2.number_input(
+                "סכום (₪)", min_value=0.0, step=100.0,
+                value=float(event.amount), format="%.2f", key="e_ce_amount",
+            )
+            e_date = c3.date_input("תאריך", value=event.date, key="e_ce_date")
+            e_desc = st.text_input("תיאור", value=event.description, key="e_ce_desc")
+            if st.form_submit_button("שמור שינויים", type="primary"):
+                if e_amount <= 0:
+                    st.error("סכום חיובי חובה.")
+                else:
+                    repo.update_cash_event(
+                        tenant_id, event_id,
+                        direction=e_dir,
+                        amount=e_amount,
+                        date=e_date,
+                        description=e_desc.strip() or "תנועה ידנית",
+                    )
+                    st.success("עודכן.")
+                    st.rerun()

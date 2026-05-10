@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from core import repository as repo
-from core.formatting import fmt_currency
+from core.formatting import money_format
 from ui.rtl import apply_rtl
 from ui.tenant_selector import render_tenant_selector
 
@@ -31,7 +31,7 @@ if tenants:
         df.drop(columns=["id"]),
         use_container_width=True,
         hide_index=True,
-        column_config={"יתרה פותחת": st.column_config.NumberColumn(format="₪%.0f")},
+        column_config={"יתרה פותחת": st.column_config.NumberColumn(format=money_format())},
     )
 else:
     st.info("עדיין אין לקוחות. הוסף לקוח ראשון.")

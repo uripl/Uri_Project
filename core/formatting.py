@@ -19,6 +19,13 @@ def fmt_currency_precise(amount: float, currency: str = "ILS") -> str:
     return f"{sign}{amount:,.2f}"
 
 
+def money_format(decimals: int = 0) -> str:
+    """Format string for Streamlit `NumberColumn` — comma thousands separator,
+    ₪ prefix, configurable decimals. Used so currency columns in DataFrames
+    render the same way as `fmt_currency` does for inline text."""
+    return f"₪%,.{decimals}f"
+
+
 def fmt_date(d: date | datetime | None) -> str:
     if d is None:
         return "-"

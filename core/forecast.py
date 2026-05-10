@@ -7,7 +7,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from core import repository as repo
-from core.models import Debt, ExpectedIncome, RecurringExpense, RecurringIncome
+from core.models import Debt, DebtInstallment, ExpectedIncome, RecurringExpense, RecurringIncome
 
 AGING_BUCKETS = ["0-30", "31-60", "61-90", "90+"]
 
@@ -95,12 +95,23 @@ def cumulative_cash_curve(
     date_to_idx = {d: i for i, d in enumerate(days)}
 
     for debt in debts:
-        if debt.due_date < start_date:
-            idx = 0
-        elif debt.due_date > end_date:
+        installments = repo.list_debt_installments(tenant_id, debt.id, only_pending=True)
+        if installments:
+            # Debt has a payment plan: schedule each pending installment.
+            for inst in installments:
+                if start_date <= inst.due_date <= end_date:
+                    idx = date_to_idx[inst.due_date]
+                    df.at[idx, "delta_out"] += inst.amount
             continue
-        else:
-            idx = date_to_idx[debt.due_date]
+        # No plan: only project as a single payment if the due date is still
+        # in the future. Past-due debts without a plan are tracked in KPIs but
+        # excluded from the cash curve — they're an open obligation the user
+        # needs to either mark paid or schedule.
+        if debt.due_date < start_date:
+            continue
+        if debt.due_date > end_date:
+            continue
+        idx = date_to_idx[debt.due_date]
         df.at[idx, "delta_out"] += max(debt.original_amount - debt.paid_amount, 0.0)
 
     for income in incomes:

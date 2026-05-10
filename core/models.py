@@ -342,6 +342,49 @@ class RecurringIncome:
 
 
 @dataclass
+class DebtInstallment:
+    id: int
+    tenant_id: int
+    debt_id: int
+    due_date: date = field(default_factory=date.today)
+    amount: float = 0.0
+    status: str = "scheduled"
+    notes: str | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+    TABLE = "debt_installments"
+    HEADERS = (
+        "id", "tenant_id", "debt_id", "due_date", "amount",
+        "status", "notes", "created_at",
+    )
+
+    @classmethod
+    def from_row(cls, row: dict) -> "DebtInstallment":
+        return cls(
+            id=_parse_int(row.get("id")),
+            tenant_id=_parse_int(row.get("tenant_id")),
+            debt_id=_parse_int(row.get("debt_id")),
+            due_date=_parse_date(row.get("due_date")),
+            amount=_parse_float(row.get("amount")),
+            status=str(row.get("status") or "scheduled"),
+            notes=_parse_optional_str(row.get("notes")),
+            created_at=_parse_datetime(row.get("created_at")),
+        )
+
+    def to_row(self) -> dict:
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "debt_id": self.debt_id,
+            "due_date": _date_to_str(self.due_date),
+            "amount": self.amount,
+            "status": self.status,
+            "notes": self.notes or "",
+            "created_at": _dt_to_str(self.created_at),
+        }
+
+
+@dataclass
 class CashEvent:
     id: int
     tenant_id: int
@@ -387,5 +430,8 @@ class CashEvent:
         }
 
 
-ALL_MODELS = (Tenant, Debt, ExpectedIncome, RecurringExpense, RecurringIncome, CashEvent)
+ALL_MODELS = (
+    Tenant, Debt, DebtInstallment, ExpectedIncome,
+    RecurringExpense, RecurringIncome, CashEvent,
+)
 SCHEMA: dict[str, tuple[str, ...]] = {m.TABLE: m.HEADERS for m in ALL_MODELS}

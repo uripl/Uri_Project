@@ -113,23 +113,25 @@ with tab_one_off:
                 st.rerun()
 
         with tab_edit:
-            with st.form("edit_oi"):
+            with st.form(f"edit_oi_{income_id}"):
                 c1, c2 = st.columns(2)
-                e_source = c1.text_input("מקור", value=income.source, key="e_oi_source")
+                e_source = c1.text_input("מקור", value=income.source, key=f"e_oi_source_{income_id}")
                 e_amount = c2.number_input("סכום (₪)", min_value=0.0, step=100.0,
                                             value=float(income.amount), format="%.2f",
-                                            key="e_oi_amount")
+                                            key=f"e_oi_amount_{income_id}")
                 c3, c4 = st.columns(2)
-                e_date = c3.date_input("תאריך צפוי", value=income.expected_date, key="e_oi_date")
+                e_date = c3.date_input("תאריך צפוי", value=income.expected_date,
+                                       key=f"e_oi_date_{income_id}")
                 e_prob = c4.slider("סבירות (%)", 0, 100, value=int(income.probability),
-                                    step=5, key="e_oi_prob")
+                                    step=5, key=f"e_oi_prob_{income_id}")
                 statuses = list(INCOME_STATUSES.keys())
                 e_status = st.selectbox(
                     "סטטוס", statuses,
                     index=statuses.index(income.status) if income.status in statuses else 0,
-                    format_func=lambda s: INCOME_STATUSES[s], key="e_oi_status",
+                    format_func=lambda s: INCOME_STATUSES[s], key=f"e_oi_status_{income_id}",
                 )
-                e_notes = st.text_area("הערות", value=income.notes or "", height=70, key="e_oi_notes")
+                e_notes = st.text_area("הערות", value=income.notes or "", height=70,
+                                        key=f"e_oi_notes_{income_id}")
 
                 if st.form_submit_button("שמור שינויים", type="primary"):
                     if not e_source.strip() or e_amount <= 0:
@@ -257,29 +259,29 @@ with tab_recurring:
                 st.rerun()
 
         with tab_edit:
-            with st.form("edit_ri"):
+            with st.form(f"edit_ri_{ri_id}"):
                 c1, c2 = st.columns(2)
-                e_source = c1.text_input("מקור", value=ri.source, key="e_ri_source")
+                e_source = c1.text_input("מקור", value=ri.source, key=f"e_ri_source_{ri_id}")
                 e_category = c2.selectbox(
                     "קטגוריה", INCOME_CATEGORIES,
                     index=INCOME_CATEGORIES.index(ri.category) if ri.category in INCOME_CATEGORIES else 0,
-                    key="e_ri_cat",
+                    key=f"e_ri_cat_{ri_id}",
                 )
                 c3, c4, c5 = st.columns(3)
                 e_amount = c3.number_input(
                     "סכום (₪)", min_value=0.0, step=100.0,
-                    value=float(ri.amount), format="%.2f", key="e_ri_amount",
+                    value=float(ri.amount), format="%.2f", key=f"e_ri_amount_{ri_id}",
                 )
                 freqs = list(FREQUENCIES.keys())
                 e_freq = c4.selectbox(
                     "תדירות", freqs,
                     index=freqs.index(ri.frequency) if ri.frequency in freqs else 0,
-                    format_func=lambda f: FREQUENCIES[f], key="e_ri_freq",
+                    format_func=lambda f: FREQUENCIES[f], key=f"e_ri_freq_{ri_id}",
                 )
                 if e_freq == "monthly":
                     e_day = c5.number_input(
                         "יום בחודש (1-31)", min_value=1, max_value=31,
-                        value=int(ri.day_of_month), key="e_ri_day_m",
+                        value=int(ri.day_of_month), key=f"e_ri_day_m_{ri_id}",
                     )
                 else:
                     weekdays = list(range(1, 8))
@@ -287,12 +289,14 @@ with tab_recurring:
                         "יום בשבוע", weekdays,
                         index=(int(ri.day_of_month) - 1) % 7 if 1 <= int(ri.day_of_month) <= 7 else 0,
                         format_func=lambda d: ["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"][d - 1],
-                        key="e_ri_day_w",
+                        key=f"e_ri_day_w_{ri_id}",
                     )
                 c6, c7 = st.columns(2)
-                e_prob = c6.slider("סבירות (%)", 0, 100, value=int(ri.probability), step=5, key="e_ri_prob")
-                e_active = c7.checkbox("פעיל", value=ri.active, key="e_ri_active")
-                e_notes = st.text_area("הערות", value=ri.notes or "", height=60, key="e_ri_notes")
+                e_prob = c6.slider("סבירות (%)", 0, 100, value=int(ri.probability), step=5,
+                                    key=f"e_ri_prob_{ri_id}")
+                e_active = c7.checkbox("פעיל", value=ri.active, key=f"e_ri_active_{ri_id}")
+                e_notes = st.text_area("הערות", value=ri.notes or "", height=60,
+                                        key=f"e_ri_notes_{ri_id}")
 
                 if st.form_submit_button("שמור שינויים", type="primary"):
                     if not e_source.strip() or e_amount <= 0:

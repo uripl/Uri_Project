@@ -148,20 +148,20 @@ else:
             st.rerun()
 
     with tab_edit:
-        with st.form("edit_cash"):
+        with st.form(f"edit_cash_{event_id}"):
             c1, c2, c3 = st.columns(3)
             e_dir = c1.selectbox(
                 "כיוון", ["in", "out"],
                 index=0 if event.direction == "in" else 1,
                 format_func=lambda x: "כניסה" if x == "in" else "יציאה",
-                key="e_ce_dir",
+                key=f"e_ce_dir_{event_id}",
             )
             e_amount = c2.number_input(
                 "סכום (₪)", min_value=0.0, step=100.0,
-                value=float(event.amount), format="%.2f", key="e_ce_amount",
+                value=float(event.amount), format="%.2f", key=f"e_ce_amount_{event_id}",
             )
-            e_date = c3.date_input("תאריך", value=event.date, key="e_ce_date")
-            e_desc = st.text_input("תיאור", value=event.description, key="e_ce_desc")
+            e_date = c3.date_input("תאריך", value=event.date, key=f"e_ce_date_{event_id}")
+            e_desc = st.text_input("תיאור", value=event.description, key=f"e_ce_desc_{event_id}")
             if st.form_submit_button("שמור שינויים", type="primary"):
                 if e_amount <= 0:
                     st.error("סכום חיובי חובה.")

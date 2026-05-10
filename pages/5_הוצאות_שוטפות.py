@@ -115,29 +115,29 @@ else:
             st.rerun()
 
     with tab_edit:
-        with st.form("edit_expense"):
+        with st.form(f"edit_expense_{expense_id}"):
             c1, c2 = st.columns(2)
-            e_name = c1.text_input("שם", value=expense.name, key="e_exp_name")
+            e_name = c1.text_input("שם", value=expense.name, key=f"e_exp_name_{expense_id}")
             e_category = c2.selectbox(
                 "קטגוריה", EXPENSE_CATEGORIES,
                 index=EXPENSE_CATEGORIES.index(expense.category) if expense.category in EXPENSE_CATEGORIES else 0,
-                key="e_exp_cat",
+                key=f"e_exp_cat_{expense_id}",
             )
             c3, c4, c5 = st.columns(3)
             e_amount = c3.number_input(
                 "סכום (₪)", min_value=0.0, step=100.0,
-                value=float(expense.amount), format="%.2f", key="e_exp_amount",
+                value=float(expense.amount), format="%.2f", key=f"e_exp_amount_{expense_id}",
             )
             freqs = list(FREQUENCIES.keys())
             e_freq = c4.selectbox(
                 "תדירות", freqs,
                 index=freqs.index(expense.frequency) if expense.frequency in freqs else 0,
-                format_func=lambda f: FREQUENCIES[f], key="e_exp_freq",
+                format_func=lambda f: FREQUENCIES[f], key=f"e_exp_freq_{expense_id}",
             )
             if e_freq == "monthly":
                 e_day = c5.number_input(
                     "יום בחודש (1-31)", min_value=1, max_value=31,
-                    value=int(expense.day_of_month), key="e_exp_day_m",
+                    value=int(expense.day_of_month), key=f"e_exp_day_m_{expense_id}",
                 )
             else:
                 weekdays = list(range(1, 8))
@@ -145,10 +145,11 @@ else:
                     "יום בשבוע", weekdays,
                     index=(int(expense.day_of_month) - 1) % 7 if 1 <= int(expense.day_of_month) <= 7 else 0,
                     format_func=lambda d: ["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"][d - 1],
-                    key="e_exp_day_w",
+                    key=f"e_exp_day_w_{expense_id}",
                 )
-            e_active = st.checkbox("פעיל", value=expense.active, key="e_exp_active")
-            e_notes = st.text_area("הערות", value=expense.notes or "", height=60, key="e_exp_notes")
+            e_active = st.checkbox("פעיל", value=expense.active, key=f"e_exp_active_{expense_id}")
+            e_notes = st.text_area("הערות", value=expense.notes or "", height=60,
+                                    key=f"e_exp_notes_{expense_id}")
 
             if st.form_submit_button("שמור שינויים", type="primary"):
                 if not e_name.strip() or e_amount <= 0:

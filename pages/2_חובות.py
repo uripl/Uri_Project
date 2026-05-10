@@ -169,32 +169,32 @@ else:
 
     # ------------------------------------------------------ edit form
     with tab_edit:
-        with st.form("edit_debt"):
+        with st.form(f"edit_debt_{debt_id}"):
             c1, c2, c3 = st.columns(3)
-            new_creditor = c1.text_input("נושה", value=debt.creditor, key="ed_creditor")
+            new_creditor = c1.text_input("נושה", value=debt.creditor, key=f"ed_creditor_{debt_id}")
             new_category = c2.selectbox(
                 "קטגוריה", DEBT_CATEGORIES,
                 index=DEBT_CATEGORIES.index(debt.category) if debt.category in DEBT_CATEGORIES else 0,
-                key="ed_category",
+                key=f"ed_category_{debt_id}",
             )
             new_amount = c3.number_input(
                 "סכום מקורי (₪)", min_value=0.0, step=100.0,
-                value=float(debt.original_amount), format="%.2f", key="ed_amount",
+                value=float(debt.original_amount), format="%.2f", key=f"ed_amount_{debt_id}",
             )
 
             c4, c5, c6 = st.columns(3)
-            new_due = c4.date_input("תאריך פירעון", value=debt.due_date, key="ed_due")
+            new_due = c4.date_input("תאריך פירעון", value=debt.due_date, key=f"ed_due_{debt_id}")
             new_paid = c5.number_input(
                 "שולם עד כה (₪)", min_value=0.0, step=100.0,
-                value=float(debt.paid_amount), format="%.2f", key="ed_paid",
+                value=float(debt.paid_amount), format="%.2f", key=f"ed_paid_{debt_id}",
             )
             statuses = list(DEBT_STATUSES.keys())
             new_status = c6.selectbox(
                 "סטטוס", statuses,
                 index=statuses.index(debt.status) if debt.status in statuses else 0,
-                format_func=lambda s: DEBT_STATUSES[s], key="ed_status",
+                format_func=lambda s: DEBT_STATUSES[s], key=f"ed_status_{debt_id}",
             )
-            new_notes = st.text_area("הערות", value=debt.notes or "", height=70, key="ed_notes")
+            new_notes = st.text_area("הערות", value=debt.notes or "", height=70, key=f"ed_notes_{debt_id}")
 
             if st.form_submit_button("שמור שינויים", type="primary"):
                 if not new_creditor.strip() or new_amount <= 0:

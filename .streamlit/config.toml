@@ -1,0 +1,8 @@
+[client]
+# Show full error details (message + stack) instead of the default redacted one,
+# so unexpected exceptions surface with enough info to diagnose. The dashboard
+# is single-tenant, so there's no privacy concern with showing tracebacks here.
+showErrorDetails = "full"
+
+[server]
+runOnSave = true

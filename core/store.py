@@ -5,6 +5,7 @@ The Store works with simple `dict` rows of primitives (str/int/float). Models in
 """
 from __future__ import annotations
 
+import time
 from typing import Iterable, Protocol
 
 from core.models import SCHEMA
@@ -76,9 +77,35 @@ class SheetsStore:
     always column A.
     """
 
-    def __init__(self, spreadsheet) -> None:
+    def __init__(self, spreadsheet, cache_ttl_seconds: float = 60.0) -> None:
         self._ss = spreadsheet
         self._ws_cache: dict[str, object] = {}
+        # In-process cache of `list_rows` results. Each entry stores a (timestamp,
+        # rows) tuple. Reads serve from cache when fresh; writes invalidate the
+        # affected table. This dramatically reduces Sheets API calls and avoids
+        # rate-limit-induced page failures during a single Streamlit rerun.
+        self._row_cache: dict[str, tuple[float, list[dict]]] = {}
+        self._cache_ttl = cache_ttl_seconds
+
+    def _cache_get(self, table: str) -> list[dict] | None:
+        entry = self._row_cache.get(table)
+        if entry is None:
+            return None
+        ts, rows = entry
+        if time.time() - ts > self._cache_ttl:
+            self._row_cache.pop(table, None)
+            return None
+        return rows
+
+    def _cache_set(self, table: str, rows: list[dict]) -> None:
+        self._row_cache[table] = (time.time(), rows)
+
+    def _invalidate(self, table: str) -> None:
+        self._row_cache.pop(table, None)
+
+    def invalidate_all(self) -> None:
+        """Force a full refresh on next read. Useful after external sheet edits."""
+        self._row_cache.clear()
 
     # ------------------------------------------------------------------ schema
 
@@ -135,7 +162,18 @@ class SheetsStore:
         return out
 
     def _find_row_index(self, table: str, row_id: int) -> int | None:
-        """Return 1-indexed sheet row number for the given id, or None."""
+        """Return 1-indexed sheet row number for the given id, or None.
+        Uses cached rows when available so we don't hit the API for the lookup."""
+        cached = self._cache_get(table)
+        if cached is not None:
+            for i, r in enumerate(cached, start=2):  # row 1 = header
+                try:
+                    if int(float(r.get("id", 0))) == int(row_id):
+                        return i
+                except (TypeError, ValueError):
+                    continue
+            return None
+        # Cache miss → one focused read of the id column.
         ws = self._ws(table)
         ids = ws.col_values(1)
         for idx, v in enumerate(ids[1:], start=2):
@@ -149,8 +187,13 @@ class SheetsStore:
     # ------------------------------------------------------------------- API
 
     def list_rows(self, table: str) -> list[dict]:
+        cached = self._cache_get(table)
+        if cached is not None:
+            return [dict(r) for r in cached]
         headers, rows = self._read_table(table)
-        return [self._row_to_dict(headers, r) for r in rows if any(c != "" for c in r)]
+        records = [self._row_to_dict(headers, r) for r in rows if any(c != "" for c in r)]
+        self._cache_set(table, records)
+        return [dict(r) for r in records]
 
     def get_row(self, table: str, row_id: int) -> dict | None:
         for r in self.list_rows(table):
@@ -174,6 +217,7 @@ class SheetsStore:
         full_row = {**fields, "id": next_id}
         values = [_serialize_cell(full_row.get(h, "")) for h in headers]
         ws.append_row(values, value_input_option="RAW")
+        self._invalidate(table)
         return full_row
 
     def update(self, table: str, row_id: int, fields: dict) -> None:
@@ -194,12 +238,14 @@ class SheetsStore:
             batch.append({"range": a1, "values": [[_serialize_cell(val)]]})
         if batch:
             ws.batch_update(batch, value_input_option="RAW")
+        self._invalidate(table)
 
     def delete(self, table: str, row_id: int) -> None:
         idx = self._find_row_index(table, row_id)
         if idx is None:
             return
         self._ws(table).delete_rows(idx)
+        self._invalidate(table)
 
     def delete_where(self, table: str, predicate_fields: dict) -> int:
         ws = self._ws(table)
@@ -212,6 +258,8 @@ class SheetsStore:
                 targets.append(i)
         for idx in sorted(targets, reverse=True):
             ws.delete_rows(idx)
+        if targets:
+            self._invalidate(table)
         return len(targets)
 
 

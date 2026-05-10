@@ -77,11 +77,25 @@ fig.add_trace(go.Scatter(
 fig.add_hline(y=0, line=dict(color="#cf222e", width=2, dash="dash"))
 
 if zero_date is not None:
-    fig.add_vline(
-        x=zero_date.isoformat(),
+    fig.add_shape(
+        type="line",
+        xref="x",
+        yref="paper",
+        x0=zero_date.isoformat(),
+        x1=zero_date.isoformat(),
+        y0=0,
+        y1=1,
         line=dict(color="#cf222e", width=2, dash="dot"),
-        annotation_text="חציית 0",
-        annotation_position="top",
+    )
+    fig.add_annotation(
+        xref="x",
+        yref="paper",
+        x=zero_date.isoformat(),
+        y=1.0,
+        text="חציית 0",
+        showarrow=False,
+        yanchor="bottom",
+        font=dict(color="#cf222e"),
     )
 
 fig.update_layout(

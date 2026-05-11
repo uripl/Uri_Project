@@ -101,10 +101,11 @@ if zero_date is not None:
 fig.update_layout(
     height=420,
     margin=dict(l=10, r=10, t=10, b=10),
-    xaxis_title="",
-    yaxis_title=f"יתרה ({tenant.currency})",
+    xaxis=dict(title="", autorange="reversed", tickformat="%m/%Y"),
+    yaxis=dict(title="", tickprefix="₪ ", tickformat=",.0f"),
     hovermode="x unified",
     showlegend=False,
+    font=dict(family="Heebo, sans-serif", size=13),
 )
 st.plotly_chart(fig, use_container_width=True)
 
@@ -126,7 +127,8 @@ bucket_fig.update_layout(
     height=260,
     margin=dict(l=10, r=10, t=10, b=10),
     xaxis_title="",
-    yaxis_title=tenant.currency,
+    yaxis=dict(title="", tickprefix="₪ ", tickformat=",.0f"),
     showlegend=False,
+    font=dict(family="Heebo, sans-serif", size=13),
 )
 st.plotly_chart(bucket_fig, use_container_width=True)

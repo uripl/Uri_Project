@@ -264,3 +264,98 @@ def monthly_cash_summary(
     )
     grouped["net"] = grouped["delta_in"] - grouped["delta_out"]
     return grouped
+
+
+def _month_start(d: date) -> date:
+    return date(d.year, d.month, 1)
+
+
+def _iter_month_starts(start: date, end: date) -> list[date]:
+    """All month-start dates in [start, end], anchored to start.month."""
+    y, m = start.year, start.month
+    out = []
+    while True:
+        ms = date(y, m, 1)
+        if ms > end:
+            break
+        out.append(ms)
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def monthly_cash_breakdown(
+    tenant_id: int, start_date: date | None = None, horizon_days: int = 365
+) -> pd.DataFrame:
+    """Monthly cash projection split into three categories.
+
+    Columns: period (month-start date), incomes, expenses, debt_payments, net.
+    - incomes: one-off expected_incomes + recurring_incomes (probability-weighted).
+    - expenses: recurring_expenses only (manual cash events are historical, not forecast).
+    - debt_payments: pending installments + bare debts whose due-date lands in the month.
+                     Past-due installments (before start_date) collapse into the first month
+                     so the planned amount still shows up — matches cumulative_cash_curve.
+    """
+    if start_date is None:
+        start_date = date.today()
+    end_date = start_date + timedelta(days=horizon_days)
+
+    debts = repo.list_debts(tenant_id, only_open=True)
+    expected_incomes = repo.list_expected_incomes(tenant_id, only_pending=True)
+    recurring_expenses = repo.list_recurring_expenses(tenant_id, only_active=True)
+    recurring_incomes = repo.list_recurring_incomes(tenant_id, only_active=True)
+
+    months = _iter_month_starts(_month_start(start_date), end_date)
+    rows = {ms: {"incomes": 0.0, "expenses": 0.0, "debt_payments": 0.0} for ms in months}
+    first_month = months[0] if months else _month_start(start_date)
+
+    def _bucket_for(d: date) -> date | None:
+        if d < start_date:
+            return first_month
+        if d > end_date:
+            return None
+        return _month_start(d)
+
+    for debt in debts:
+        installments = repo.list_debt_installments(tenant_id, debt.id, only_pending=True)
+        if installments:
+            for inst in installments:
+                bucket = _bucket_for(inst.due_date)
+                if bucket is None or bucket not in rows:
+                    continue
+                rows[bucket]["debt_payments"] += inst.amount
+            continue
+        # No plan: project as single payment only if due date is still in horizon.
+        if debt.due_date < start_date or debt.due_date > end_date:
+            continue
+        rows[_month_start(debt.due_date)]["debt_payments"] += max(
+            debt.original_amount - debt.paid_amount, 0.0
+        )
+
+    for inc in expected_incomes:
+        if inc.expected_date < start_date or inc.expected_date > end_date:
+            continue
+        rows[_month_start(inc.expected_date)]["incomes"] += inc.amount * (inc.probability / 100.0)
+
+    for exp in recurring_expenses:
+        for occ in _generate_recurring_dates(exp, start_date, end_date):
+            ms = _month_start(occ)
+            if ms in rows:
+                rows[ms]["expenses"] += exp.amount
+
+    for ri in recurring_incomes:
+        for occ in _generate_recurring_dates(ri, start_date, end_date):
+            ms = _month_start(occ)
+            if ms in rows:
+                rows[ms]["incomes"] += ri.amount * (ri.probability / 100.0)
+
+    df = pd.DataFrame([
+        {
+            "period": ms,
+            "incomes": rows[ms]["incomes"],
+            "expenses": rows[ms]["expenses"],
+            "debt_payments": rows[ms]["debt_payments"],
+            "net": rows[ms]["incomes"] - rows[ms]["expenses"] - rows[ms]["debt_payments"],
+        }
+        for ms in months
+    ])
+    return df

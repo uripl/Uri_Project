@@ -8,6 +8,7 @@ import pandas as pd
 
 from core import forecast, repository as repo
 from core.formatting import fmt_currency, fmt_date, money_format
+from core.pdf_export import ReportSections, build_cashflow_report
 from ui.rtl import apply_rtl
 from ui.tenant_selector import require_tenant
 
@@ -36,6 +37,58 @@ today = date.today()
 
 horizon_label = st.selectbox("טווח", ["3 חודשים", "6 חודשים", "12 חודשים"], index=1)
 horizon_days = {"3 חודשים": 90, "6 חודשים": 180, "12 חודשים": 365}[horizon_label]
+
+with st.expander("📄 ייצוא דוח PDF ללקוח", expanded=False):
+    st.caption("בחרי אילו חלקים לכלול בדוח, ולחצי 'הפק PDF' להורדה.")
+    exp_c1, exp_c2 = st.columns(2)
+    inc_kpis = exp_c1.checkbox("מדדים עיקריים (יתרה, חוב, הכנסה צפויה)", value=True)
+    inc_monthly = exp_c1.checkbox("טבלת פירוט חודשי", value=True)
+    inc_debt = exp_c2.checkbox("פריסת חובות לחודשים", value=True)
+    inc_events = exp_c2.checkbox("היסטוריית תנועות", value=False)
+    events_limit = st.number_input(
+        "כמה תנועות אחרונות לכלול", min_value=5, max_value=200, value=30, step=5,
+        disabled=not inc_events,
+    )
+    client_name_override = st.text_input(
+        "שם הלקוח להופעה בכותרת (אופציונלי)", value="",
+        placeholder=tenant.name,
+        help="ריק = שם הלקוח הנוכחי במערכת.",
+    )
+    note = st.text_area(
+        "הערה / מבוא לדוח (אופציונלי)", value="", height=80,
+        placeholder="לדוגמה: דוח לפגישה ב-15/05/2026",
+    )
+
+    if not any([inc_kpis, inc_monthly, inc_debt, inc_events]):
+        st.warning("יש לבחור לפחות חלק אחד לכלול בדוח.")
+    else:
+        sections = ReportSections(
+            kpis=inc_kpis,
+            monthly=inc_monthly,
+            debt_matrix=inc_debt,
+            events=inc_events,
+            events_limit=int(events_limit),
+        )
+        try:
+            pdf_bytes = build_cashflow_report(
+                tenant_id,
+                sections=sections,
+                start_date=today,
+                horizon_days=horizon_days,
+                client_name_override=client_name_override or None,
+                note=note.strip() or None,
+            )
+            file_name = f"cashflow_{tenant.name}_{today.isoformat()}.pdf".replace(" ", "_")
+            st.download_button(
+                "📥 הפק PDF",
+                data=pdf_bytes,
+                file_name=file_name,
+                mime="application/pdf",
+                type="primary",
+                use_container_width=False,
+            )
+        except Exception as e:
+            st.error(f"שגיאה ביצירת הדוח: {e}")
 
 df = forecast.monthly_cash_breakdown(tenant_id, start_date=today, horizon_days=horizon_days)
 

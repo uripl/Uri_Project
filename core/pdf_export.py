@@ -14,6 +14,8 @@ from datetime import date
 
 import pandas as pd
 from bidi.algorithm import get_display
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.shapes import Drawing, Rect, String
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
@@ -33,9 +35,17 @@ from reportlab.platypus import (
 from core import forecast, repository as repo
 from core.formatting import fmt_currency, fmt_date
 
-# Hebrew-capable fonts that ship with Debian/Ubuntu (Streamlit Cloud's base
-# image) and common dev machines. First match wins; bold is optional.
+# Heebo (bundled in assets/fonts/) is the primary font — it has full Hebrew
+# coverage and is guaranteed to be present, so we don't depend on what fonts
+# Streamlit Cloud's base image happens to ship.
+_BUNDLED_FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "fonts")
 _FONT_CANDIDATES = [
+    (
+        os.path.join(_BUNDLED_FONT_DIR, "Heebo-Regular.ttf"),
+        os.path.join(_BUNDLED_FONT_DIR, "Heebo-Bold.ttf"),
+    ),
+    # System-font fallbacks. Kept so devs without the repo checkout can still
+    # generate something; in production the bundled font wins.
     (
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -93,6 +103,7 @@ def _rtl_row(row: list) -> list:
 @dataclass
 class ReportSections:
     kpis: bool = True
+    chart: bool = True
     monthly: bool = True
     debt_matrix: bool = True
     events: bool = False
@@ -174,6 +185,9 @@ def build_cashflow_report(
     if sections.kpis:
         _add_kpis(story, tenant_id, tenant, start_date, horizon_days, font_reg, font_bold, h2)
 
+    if sections.chart:
+        _add_chart(story, tenant_id, tenant, start_date, horizon_days, font_reg, font_bold, h2, caption)
+
     if sections.monthly:
         _add_monthly_table(story, tenant_id, tenant, start_date, horizon_days, font_reg, font_bold, h2)
 
@@ -232,6 +246,100 @@ def _add_kpis(story, tenant_id, tenant, start_date, horizon_days, font_reg, font
 
     story.append(Paragraph(_rtl("מדדים עיקריים"), h2))
     story.append(table)
+
+
+def _add_chart(story, tenant_id, tenant, start_date, horizon_days, font_reg, font_bold, h2, caption):
+    df = forecast.monthly_cash_breakdown(tenant_id, start_date=start_date, horizon_days=horizon_days)
+    story.append(Paragraph(_rtl("גרף תזרים חודשי"), h2))
+    if df.empty:
+        p = ParagraphStyle("p", fontName=font_reg, fontSize=10, alignment=TA_RIGHT)
+        story.append(Paragraph(_rtl("אין נתונים בטווח שנבחר."), p))
+        return
+
+    # Reverse series so the most recent month sits on the LEFT of the
+    # left-to-right axis — that puts the chronological start on the RIGHT, which
+    # matches Hebrew reading order.
+    month_labels = [p.strftime("%m/%Y") for p in df["period"]][::-1]
+    incomes = [float(v) for v in df["incomes"]][::-1]
+    expenses = [float(v) for v in df["expenses"]][::-1]
+    debts = [float(v) for v in df["debt_payments"]][::-1]
+
+    width = 175 * mm
+    height = 75 * mm
+    drawing = Drawing(width, height)
+
+    chart = VerticalBarChart()
+    chart.x = 45
+    chart.y = 32
+    chart.width = width - 60
+    chart.height = height - 50
+    chart.data = [incomes, expenses, debts]
+    chart.bars[0].fillColor = colors.HexColor("#1a7f37")
+    chart.bars[1].fillColor = colors.HexColor("#cf222e")
+    chart.bars[2].fillColor = colors.HexColor("#bf8700")
+    for i in range(3):
+        chart.bars[i].strokeColor = colors.white
+        chart.bars[i].strokeWidth = 0.5
+    chart.groupSpacing = 6
+    chart.barSpacing = 1
+
+    chart.categoryAxis.categoryNames = month_labels
+    chart.categoryAxis.labels.fontName = font_reg
+    chart.categoryAxis.labels.fontSize = 8
+    chart.categoryAxis.labels.dy = -4
+
+    chart.valueAxis.labels.fontName = font_reg
+    chart.valueAxis.labels.fontSize = 8
+    chart.valueAxis.valueMin = 0
+    max_val = max([0.0, *incomes, *expenses, *debts])
+    if max_val > 0:
+        chart.valueAxis.valueMax = max_val * 1.1
+        chart.valueAxis.valueStep = _nice_step(max_val * 1.1)
+
+    drawing.add(chart)
+
+    # Inline legend at the top-right, drawn manually so Hebrew labels go through
+    # _rtl() and we control RTL ordering of the swatch/label sequence.
+    legend_entries = [
+        (colors.HexColor("#1a7f37"), "הכנסות"),
+        (colors.HexColor("#cf222e"), "הוצאות"),
+        (colors.HexColor("#bf8700"), "החזר חובות"),
+    ]
+    lx = width - 8
+    ly = height - 8
+    for color, label in legend_entries:
+        text = _rtl(label)
+        # Label is right-anchored to lx, swatch sits just to its left.
+        drawing.add(String(lx, ly, text, fontName=font_reg, fontSize=9,
+                            fillColor=colors.HexColor("#24292f"), textAnchor="end"))
+        # Estimate label width to position the swatch — ReportLab strings
+        # don't expose a measured width on the Drawing, so we approximate.
+        approx_w = len(label) * 5.5
+        drawing.add(Rect(lx - approx_w - 12, ly + 1, 8, 8,
+                          fillColor=color, strokeColor=color))
+        lx -= approx_w + 22
+
+    story.append(drawing)
+    story.append(Spacer(1, 4))
+    story.append(
+        Paragraph(
+            _rtl("ערכי החזר חובות מתוכננים בלבד; הוצאות מבוססות על הוצאות שוטפות פעילות."),
+            caption,
+        )
+    )
+
+
+def _nice_step(max_value: float) -> float:
+    """Round max_value/5 up to a friendly tick step (5×10ⁿ / 2×10ⁿ / 10ⁿ)."""
+    if max_value <= 0:
+        return 1.0
+    raw = max_value / 5
+    power = 10 ** (len(str(int(raw))) - 1)
+    for mult in (1, 2, 2.5, 5, 10):
+        step = mult * power
+        if step >= raw:
+            return step
+    return power * 10
 
 
 def _add_monthly_table(story, tenant_id, tenant, start_date, horizon_days, font_reg, font_bold, h2):
@@ -299,10 +407,11 @@ def _add_debt_matrix(story, tenant_id, tenant, start_date, font_reg, font_bold, 
         for d in repo.list_debts(tenant_id, only_open=True)
         if max(d.original_amount - d.paid_amount, 0.0) > 0
     ]
-    story.append(Paragraph(_rtl("פריסת חובות לחודשים"), h2))
+    heading = Paragraph(_rtl("פריסת חובות לחודשים"), h2)
 
     if not open_debts:
         p = ParagraphStyle("p", fontName=font_reg, fontSize=10, alignment=TA_RIGHT)
+        story.append(heading)
         story.append(Paragraph(_rtl("אין חובות פתוחים."), p))
         return
 
@@ -351,7 +460,7 @@ def _add_debt_matrix(story, tenant_id, tenant, start_date, font_reg, font_bold, 
     style.add("LINEABOVE", (0, -1), (-1, -1), 0.5, colors.HexColor("#24292f"))
     table.setStyle(style)
 
-    story.append(KeepTogether([table]))
+    story.append(KeepTogether([heading, table]))
     story.append(Spacer(1, 4))
     story.append(
         Paragraph(

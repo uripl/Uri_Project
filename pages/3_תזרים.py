@@ -42,6 +42,7 @@ with st.expander("📄 ייצוא דוח PDF ללקוח", expanded=False):
     st.caption("בחרי אילו חלקים לכלול בדוח, ולחצי 'הפק PDF' להורדה.")
     exp_c1, exp_c2 = st.columns(2)
     inc_kpis = exp_c1.checkbox("מדדים עיקריים (יתרה, חוב, הכנסה צפויה)", value=True)
+    inc_chart = exp_c1.checkbox("גרף תזרים חודשי", value=True)
     inc_monthly = exp_c1.checkbox("טבלת פירוט חודשי", value=True)
     inc_debt = exp_c2.checkbox("פריסת חובות לחודשים", value=True)
     inc_events = exp_c2.checkbox("היסטוריית תנועות", value=False)
@@ -59,11 +60,12 @@ with st.expander("📄 ייצוא דוח PDF ללקוח", expanded=False):
         placeholder="לדוגמה: דוח לפגישה ב-15/05/2026",
     )
 
-    if not any([inc_kpis, inc_monthly, inc_debt, inc_events]):
+    if not any([inc_kpis, inc_chart, inc_monthly, inc_debt, inc_events]):
         st.warning("יש לבחור לפחות חלק אחד לכלול בדוח.")
     else:
         sections = ReportSections(
             kpis=inc_kpis,
+            chart=inc_chart,
             monthly=inc_monthly,
             debt_matrix=inc_debt,
             events=inc_events,

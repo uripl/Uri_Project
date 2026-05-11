@@ -155,6 +155,48 @@ def test_overdue_debt_without_plan_is_not_in_curve(tenant):
     assert (df["balance"] == 10_000.0).all()
 
 
+def test_monthly_breakdown_splits_income_expense_debt(tenant):
+    start = date(2026, 1, 1)
+    repo.create_expected_income(
+        tenant.id, source="לקוח", amount=4_000.0, probability=100,
+        expected_date=date(2026, 1, 15), status="pending",
+    )
+    repo.create_recurring_expense(
+        tenant.id, name="שכירות", category="שכירות", amount=3_000.0,
+        frequency="monthly", day_of_month=1, active=True,
+    )
+    debt = repo.create_debt(
+        tenant.id, creditor="ספק", category="ספק", original_amount=2_000.0,
+        paid_amount=0.0, due_date=date(2026, 1, 20), status="open",
+    )
+    df = forecast.monthly_cash_breakdown(tenant.id, start_date=start, horizon_days=60)
+    jan = df[df["period"] == date(2026, 1, 1)].iloc[0]
+    assert jan["incomes"] == 4_000.0
+    assert jan["expenses"] == 3_000.0
+    assert jan["debt_payments"] == 2_000.0
+    assert jan["net"] == -1_000.0
+
+
+def test_monthly_breakdown_collapses_past_due_installments_to_first_month(tenant):
+    start = date(2026, 3, 10)
+    debt = repo.create_debt(
+        tenant.id, creditor="חוב", category="הלוואה", original_amount=5_000.0,
+        paid_amount=0.0, due_date=date(2026, 1, 1), status="open",
+    )
+    repo.create_debt_installment(
+        tenant.id, debt.id, due_date=date(2026, 2, 1), amount=1_500.0,
+    )
+    repo.create_debt_installment(
+        tenant.id, debt.id, due_date=date(2026, 4, 1), amount=1_500.0,
+    )
+    df = forecast.monthly_cash_breakdown(tenant.id, start_date=start, horizon_days=60)
+    march = df[df["period"] == date(2026, 3, 1)].iloc[0]
+    april = df[df["period"] == date(2026, 4, 1)].iloc[0]
+    # February installment is past-due → collapses to first month bucket (March).
+    assert march["debt_payments"] == 1_500.0
+    assert april["debt_payments"] == 1_500.0
+
+
 def test_installments_drive_forecast_when_present(tenant):
     today = date.today()
     debt = repo.create_debt(

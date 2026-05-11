@@ -34,66 +34,78 @@ st.title(f"תזרים — {tenant.name}")
 
 today = date.today()
 
-c1, c2 = st.columns([1, 3])
-with c1:
-    granularity = st.radio("גרגיריות", ["שבועי", "חודשי"], horizontal=True)
-    horizon_label = st.selectbox("טווח", ["3 חודשים", "6 חודשים", "12 חודשים"], index=1)
-    horizon_days = {"3 חודשים": 90, "6 חודשים": 180, "12 חודשים": 365}[horizon_label]
+horizon_label = st.selectbox("טווח", ["3 חודשים", "6 חודשים", "12 חודשים"], index=1)
+horizon_days = {"3 חודשים": 90, "6 חודשים": 180, "12 חודשים": 365}[horizon_label]
 
-if granularity == "שבועי":
-    df = forecast.weekly_cash_summary(tenant_id, start_date=today, horizon_days=horizon_days)
-    period_label = "שבוע (התחלה)"
-else:
-    df = forecast.monthly_cash_summary(tenant_id, start_date=today, horizon_days=horizon_days)
-    period_label = "חודש (התחלה)"
+df = forecast.monthly_cash_breakdown(tenant_id, start_date=today, horizon_days=horizon_days)
 
 if df.empty:
     st.info("אין נתונים בטווח שנבחר.")
     st.stop()
 
+month_labels_chart = [d.strftime("%m/%Y") for d in df["period"]]
+
 fig = go.Figure()
 fig.add_trace(go.Bar(
-    x=df["period"],
-    y=df["delta_in"],
-    name="כניסות",
+    x=month_labels_chart,
+    y=df["incomes"],
+    name="הכנסות",
     marker_color="#1a7f37",
+    text=[fmt_currency(v, tenant.currency) for v in df["incomes"]],
+    textposition="outside",
 ))
 fig.add_trace(go.Bar(
-    x=df["period"],
-    y=-df["delta_out"],
-    name="יציאות",
+    x=month_labels_chart,
+    y=df["expenses"],
+    name="הוצאות",
     marker_color="#cf222e",
+    text=[fmt_currency(v, tenant.currency) for v in df["expenses"]],
+    textposition="outside",
+))
+fig.add_trace(go.Bar(
+    x=month_labels_chart,
+    y=df["debt_payments"],
+    name="החזר חובות",
+    marker_color="#bf8700",
+    text=[fmt_currency(v, tenant.currency) for v in df["debt_payments"]],
+    textposition="outside",
 ))
 fig.add_trace(go.Scatter(
-    x=df["period"],
+    x=month_labels_chart,
     y=df["net"],
     name="נטו",
-    mode="lines+markers",
-    line=dict(color="#0969da", width=2),
+    mode="lines+text",
+    line=dict(color="#0969da", width=3),
+    text=[fmt_currency(v, tenant.currency) for v in df["net"]],
+    textposition="top center",
 ))
 
 fig.update_layout(
-    barmode="relative",
-    height=420,
-    margin=dict(l=10, r=10, t=10, b=10),
-    yaxis_title=tenant.currency,
-    legend=dict(orientation="h"),
+    barmode="group",
+    height=460,
+    margin=dict(l=10, r=10, t=30, b=10),
+    yaxis=dict(tickprefix="₪ ", tickformat=",.0f", title=""),
+    xaxis=dict(title="", autorange="reversed", type="category"),
+    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     hovermode="x unified",
+    font=dict(family="Heebo, sans-serif", size=13),
+    bargap=0.25,
 )
 st.plotly_chart(fig, use_container_width=True)
 
 # Summary table -------------------------------------------------------------
-st.subheader("פירוט תקופה")
+st.subheader("פירוט חודשי")
 display = df.copy()
-display.columns = [period_label, "כניסות", "יציאות", "נטו"]
+display.columns = ["חודש", "הכנסות", "הוצאות", "החזר חובות", "נטו"]
 st.dataframe(
     display,
     use_container_width=True,
     hide_index=True,
     column_config={
-        period_label: st.column_config.DateColumn(format="DD/MM/YYYY"),
-        "כניסות": st.column_config.NumberColumn(format=money_format()),
-        "יציאות": st.column_config.NumberColumn(format=money_format()),
+        "חודש": st.column_config.DateColumn(format="MM/YYYY"),
+        "הכנסות": st.column_config.NumberColumn(format=money_format()),
+        "הוצאות": st.column_config.NumberColumn(format=money_format()),
+        "החזר חובות": st.column_config.NumberColumn(format=money_format()),
         "נטו": st.column_config.NumberColumn(format=money_format()),
     },
 )
@@ -173,6 +185,34 @@ else:
         column_order=["נושה", "יתרה"] + month_labels + ["לא מוקצה"],
         num_rows="fixed",
         key="debt_matrix_editor",
+    )
+
+    # Per-month totals row -------------------------------------------------
+    # Lets the user see how the plan distributes load across months and
+    # spot months that are too heavy. Updates live as the editor changes.
+    totals_row: dict = {"שורה": "סה״כ חודשי"}
+    grand_total = 0.0
+    for label in month_labels:
+        col_total = float(edited_df[label].fillna(0).sum())
+        totals_row[label] = col_total
+        grand_total += col_total
+    totals_row["סה״כ"] = grand_total
+
+    totals_config: dict = {
+        "שורה": st.column_config.TextColumn("", disabled=True),
+        "סה״כ": st.column_config.NumberColumn("סה״כ כל החודשים", format=money_format(), disabled=True),
+    }
+    for label in month_labels:
+        totals_config[label] = st.column_config.NumberColumn(
+            label, format=money_format(), disabled=True,
+        )
+    st.caption("סיכום החזרים מתוכננים לכל חודש (לאיזון העומס בין החודשים):")
+    st.dataframe(
+        pd.DataFrame([totals_row]),
+        use_container_width=True,
+        hide_index=True,
+        column_config=totals_config,
+        column_order=["שורה"] + month_labels + ["סה״כ"],
     )
 
     save_col, info_col = st.columns([1, 3])
